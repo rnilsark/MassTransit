@@ -23,7 +23,7 @@
                 {
                 });
 
-                configurator.ReceiveEndpoint(nameof(Publishing_hierarchical_event_from_multiple_producers),
+                configurator.ReceiveEndpoint(nameof(Publishing_hierarchical_event),
                     endpointConfigurator =>
                     {
                         endpointConfigurator.Handler((MessageHandler<IBasiestEventInterface>)(context =>
@@ -49,6 +49,76 @@
             await publisher.Publish(new TheEvent());
             await publisher.Publish(new TheEvent());
             
+            await Task.Delay(TimeSpan.FromSeconds(10));
+        }
+
+        [Test]
+        public async Task Publishing_hierarchical_event_deploying_topology_first()
+        {
+            var producerBootstrapper = Bus.Factory.CreateUsingAzureServiceBus(configurator =>
+            {
+                configurator.DeployTopologyOnly = true;
+
+                configurator.Host(TestConstants.BusConnectionString, hostConfigurator =>
+                {
+                });
+            });
+
+            var consumerBootstrapper = Bus.Factory.CreateUsingAzureServiceBus(configurator =>
+            {
+                configurator.DeployTopologyOnly = true;
+
+                configurator.Host(TestConstants.BusConnectionString, hostConfigurator =>
+                {
+                });
+
+                configurator.ReceiveEndpoint(nameof(Publishing_hierarchical_event_deploying_topology_first),
+                    endpointConfigurator =>
+                    {
+                        endpointConfigurator.Handler((MessageHandler<IBasiestEventInterface>)(context => Task.CompletedTask));
+                    });
+            });
+
+            await consumerBootstrapper.StartAsync();
+            await consumerBootstrapper.StopAsync();
+
+            var consumer = Bus.Factory.CreateUsingAzureServiceBus(configurator =>
+            {
+                ConfigureTelemetry(configurator);
+
+                configurator.Host(TestConstants.BusConnectionString, hostConfigurator =>
+                {
+                });
+
+                configurator.ReceiveEndpoint(nameof(Publishing_hierarchical_event_deploying_topology_first),
+                    endpointConfigurator =>
+                    {
+                        endpointConfigurator.Handler((MessageHandler<IBasiestEventInterface>)(context =>
+                        {
+                            Console.WriteLine($"Consumer: {nameof(IBasiestEventInterface)} Message: {JsonConvert.SerializeObject(context.Message)}");
+                            return Task.CompletedTask;
+                        }));
+                    });
+            });
+
+            await consumer.StartAsync();
+
+            await producerBootstrapper.StartAsync();
+            await producerBootstrapper.StopAsync();
+
+            var publisher = Bus.Factory.CreateUsingAzureServiceBus(configurator =>
+            {
+                ConfigureTelemetry(configurator);
+
+                configurator.Host(TestConstants.BusConnectionString, hostConfigurator =>
+                {
+                });
+            });
+
+            await publisher.StartAsync();
+            await publisher.Publish(new TheEvent());
+            await publisher.Publish(new TheEvent());
+
             await Task.Delay(TimeSpan.FromSeconds(10));
         }
 
