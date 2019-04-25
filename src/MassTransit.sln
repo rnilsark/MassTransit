@@ -174,9 +174,11 @@ Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "MassTransit.SignalR.Sample"
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "MassTransit.WebJobs.EventHubsIntegration", "MassTransit.WebJobs.EventHubsIntegration\MassTransit.WebJobs.EventHubsIntegration.csproj", "{56E9DB90-C063-49CA-BAF7-FFCFE963E44C}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MassTransit.WebJobs.Tests", "MassTransit.WebJobs.Tests\MassTransit.WebJobs.Tests.csproj", "{0C214618-DBFA-45B6-B1B3-99E90F17FE23}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "MassTransit.WebJobs.Tests", "MassTransit.WebJobs.Tests\MassTransit.WebJobs.Tests.csproj", "{0C214618-DBFA-45B6-B1B3-99E90F17FE23}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MassTransit.Automatonymous.SimpleInjectorIntegration", "Containers\MassTransit.Automatonymous.SimpleInjectorIntegration\MassTransit.Automatonymous.SimpleInjectorIntegration.csproj", "{A210D0E6-7798-46DC-93C0-367F8CBD8DC5}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "MassTransit.Automatonymous.SimpleInjectorIntegration", "Containers\MassTransit.Automatonymous.SimpleInjectorIntegration\MassTransit.Automatonymous.SimpleInjectorIntegration.csproj", "{A210D0E6-7798-46DC-93C0-367F8CBD8DC5}"
+EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "IntegrationTests", "IntegrationTests\IntegrationTests.csproj", "{9AA2139A-7052-498D-8FD7-6EAF2D3260E7}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -965,6 +967,18 @@ Global
 		{A210D0E6-7798-46DC-93C0-367F8CBD8DC5}.ReleaseUnsigned|Any CPU.Build.0 = Debug|Any CPU
 		{A210D0E6-7798-46DC-93C0-367F8CBD8DC5}.ReleaseUnsigned|x86.ActiveCfg = Debug|Any CPU
 		{A210D0E6-7798-46DC-93C0-367F8CBD8DC5}.ReleaseUnsigned|x86.Build.0 = Debug|Any CPU
+		{9AA2139A-7052-498D-8FD7-6EAF2D3260E7}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{9AA2139A-7052-498D-8FD7-6EAF2D3260E7}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{9AA2139A-7052-498D-8FD7-6EAF2D3260E7}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{9AA2139A-7052-498D-8FD7-6EAF2D3260E7}.Debug|x86.Build.0 = Debug|Any CPU
+		{9AA2139A-7052-498D-8FD7-6EAF2D3260E7}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{9AA2139A-7052-498D-8FD7-6EAF2D3260E7}.Release|Any CPU.Build.0 = Release|Any CPU
+		{9AA2139A-7052-498D-8FD7-6EAF2D3260E7}.Release|x86.ActiveCfg = Release|Any CPU
+		{9AA2139A-7052-498D-8FD7-6EAF2D3260E7}.Release|x86.Build.0 = Release|Any CPU
+		{9AA2139A-7052-498D-8FD7-6EAF2D3260E7}.ReleaseUnsigned|Any CPU.ActiveCfg = Release|Any CPU
+		{9AA2139A-7052-498D-8FD7-6EAF2D3260E7}.ReleaseUnsigned|Any CPU.Build.0 = Release|Any CPU
+		{9AA2139A-7052-498D-8FD7-6EAF2D3260E7}.ReleaseUnsigned|x86.ActiveCfg = Release|Any CPU
+		{9AA2139A-7052-498D-8FD7-6EAF2D3260E7}.ReleaseUnsigned|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -1038,7 +1052,7 @@ Global
 		{A210D0E6-7798-46DC-93C0-367F8CBD8DC5} = {6C61507E-FF16-45C8-8FE4-350069D9B4C1}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
-		SolutionGuid = {43D3A7D5-0945-435E-8D03-1E631E5CDBA8}
 		EnterpriseLibraryConfigurationToolBinariesPath = packages\Unity.2.1.505.2\lib\NET35
+		SolutionGuid = {43D3A7D5-0945-435E-8D03-1E631E5CDBA8}
 	EndGlobalSection
 EndGlobal
