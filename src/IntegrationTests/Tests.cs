@@ -4,11 +4,9 @@
     using System.Collections.Generic;
     using System.Threading.Tasks;
     using MassTransit;
-    using MassTransit.Azure.ServiceBus.Core;
     using Newtonsoft.Json;
     using NUnit.Framework;
-    using Microsoft.ApplicationInsights;
-
+    
     [TestFixture]
     public class Tests
     {
@@ -17,8 +15,6 @@
         {
             var consumer = Bus.Factory.CreateUsingAzureServiceBus(configurator =>
             {
-                ConfigureTelemetry(configurator);
-
                 configurator.Host(TestConstants.BusConnectionString, hostConfigurator =>
                 {
                 });
@@ -38,8 +34,6 @@
 
             var publisher = Bus.Factory.CreateUsingAzureServiceBus(configurator =>
             {
-                ConfigureTelemetry(configurator);
-
                 configurator.Host(TestConstants.BusConnectionString, hostConfigurator =>
                 {
                 });
@@ -84,8 +78,6 @@
 
             var consumer = Bus.Factory.CreateUsingAzureServiceBus(configurator =>
             {
-                ConfigureTelemetry(configurator);
-
                 configurator.Host(TestConstants.BusConnectionString, hostConfigurator =>
                 {
                 });
@@ -108,8 +100,6 @@
 
             var publisher = Bus.Factory.CreateUsingAzureServiceBus(configurator =>
             {
-                ConfigureTelemetry(configurator);
-
                 configurator.Host(TestConstants.BusConnectionString, hostConfigurator =>
                 {
                 });
@@ -127,8 +117,6 @@
         {
             var consumer = Bus.Factory.CreateUsingAzureServiceBus(configurator =>
             {
-                ConfigureTelemetry(configurator);
-
                 configurator.Host(TestConstants.BusConnectionString, hostConfigurator =>
                 {
                 });
@@ -154,8 +142,6 @@
                 {
                     var publisher = Bus.Factory.CreateUsingAzureServiceBus(configurator =>
                     {
-                        ConfigureTelemetry(configurator);
-
                         configurator.Host(TestConstants.BusConnectionString, hostConfigurator =>
                         {
                         });
@@ -177,8 +163,6 @@
         { 
             var consumer = Bus.Factory.CreateUsingAzureServiceBus(configurator =>
             {
-                ConfigureTelemetry(configurator);
-
                 configurator.Host(TestConstants.BusConnectionString, hostConfigurator =>
                 {
                 });
@@ -204,8 +188,6 @@
                 {
                     var publisher = Bus.Factory.CreateUsingAzureServiceBus(configurator =>
                     {
-                        ConfigureTelemetry(configurator);
-
                         configurator.Host(TestConstants.BusConnectionString, hostConfigurator =>
                         {
                         });
@@ -220,16 +202,6 @@
 
             await Task.Delay(TimeSpan.FromSeconds(10));
         }
-
-        static void ConfigureTelemetry(IServiceBusBusFactoryConfigurator configurator)
-        {
-            var telemetryClient = new TelemetryClient();
-
-            configurator.UseApplicationInsightsOnSend(telemetryClient);
-            configurator.UseApplicationInsightsOnConsume(telemetryClient);
-            configurator.UseApplicationInsightsOnPublish(telemetryClient);
-        }
-
 
         public class TheEvent : IBaseEventInterface
         {

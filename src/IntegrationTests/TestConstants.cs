@@ -2,6 +2,6 @@
 {
     static class TestConstants
     {
-        public static string BusConnectionString = "Endpoint=sb://reactiveactor.servicebus.windows.net/;SharedAccessKeyName=SO;SharedAccessKey=LGxpxB0k8RzJ/h5Yaupb5cYnuMy6rlWUQIQUy7O0aQ4=";
+        public static string BusConnectionString = "Endpoint=sb://rnilsark-mt.servicebus.windows.net/;SharedAccessKeyName=masstransit-build;SharedAccessKey=GAjBcBau3Zx7HeAZWcFvwAYetV9GqNU5glw200Sa8sQ=";
     }
 }
