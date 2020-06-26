@@ -136,6 +136,8 @@ Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "MassTransit.EventHubIntegra
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "MassTransit.EventHubIntegration.Tests", "tests\MassTransit.EventHubIntegration.Tests\MassTransit.EventHubIntegration.Tests.csproj", "{24CC1B47-AE01-4871-A939-2BF6EB789860}"
 EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "IntegrationTests", "src\IntegrationTests\IntegrationTests.csproj", "{C20B63D1-E1CB-425D-A0D3-1F31E8079353}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -715,6 +717,18 @@ Global
 		{24CC1B47-AE01-4871-A939-2BF6EB789860}.ReleaseUnsigned|Any CPU.Build.0 = Debug|Any CPU
 		{24CC1B47-AE01-4871-A939-2BF6EB789860}.ReleaseUnsigned|x86.ActiveCfg = Debug|Any CPU
 		{24CC1B47-AE01-4871-A939-2BF6EB789860}.ReleaseUnsigned|x86.Build.0 = Debug|Any CPU
+		{C20B63D1-E1CB-425D-A0D3-1F31E8079353}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{C20B63D1-E1CB-425D-A0D3-1F31E8079353}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{C20B63D1-E1CB-425D-A0D3-1F31E8079353}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{C20B63D1-E1CB-425D-A0D3-1F31E8079353}.Debug|x86.Build.0 = Debug|Any CPU
+		{C20B63D1-E1CB-425D-A0D3-1F31E8079353}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{C20B63D1-E1CB-425D-A0D3-1F31E8079353}.Release|Any CPU.Build.0 = Release|Any CPU
+		{C20B63D1-E1CB-425D-A0D3-1F31E8079353}.Release|x86.ActiveCfg = Release|Any CPU
+		{C20B63D1-E1CB-425D-A0D3-1F31E8079353}.Release|x86.Build.0 = Release|Any CPU
+		{C20B63D1-E1CB-425D-A0D3-1F31E8079353}.ReleaseUnsigned|Any CPU.ActiveCfg = Release|Any CPU
+		{C20B63D1-E1CB-425D-A0D3-1F31E8079353}.ReleaseUnsigned|Any CPU.Build.0 = Release|Any CPU
+		{C20B63D1-E1CB-425D-A0D3-1F31E8079353}.ReleaseUnsigned|x86.ActiveCfg = Release|Any CPU
+		{C20B63D1-E1CB-425D-A0D3-1F31E8079353}.ReleaseUnsigned|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

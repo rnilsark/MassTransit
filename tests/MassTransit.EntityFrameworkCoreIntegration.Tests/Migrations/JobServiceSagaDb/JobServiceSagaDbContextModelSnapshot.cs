@@ -79,6 +79,9 @@ namespace MassTransit.EntityFrameworkCoreIntegration.Tests.Migrations.JobService
                     b.Property<string>("Job")
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<Guid?>("JobRetryDelayToken")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<Guid?>("JobSlotRequestId")
                         .HasColumnType("uniqueidentifier");
 
@@ -93,6 +96,9 @@ namespace MassTransit.EntityFrameworkCoreIntegration.Tests.Migrations.JobService
 
                     b.Property<string>("Reason")
                         .HasColumnType("nvarchar(max)");
+
+                    b.Property<int>("RetryAttempt")
+                        .HasColumnType("int");
 
                     b.Property<string>("ServiceAddress")
                         .HasColumnType("nvarchar(max)");
