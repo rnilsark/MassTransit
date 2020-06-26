@@ -1,16 +1,4 @@
-﻿// Copyright 2007-2012 Chris Patterson, Dru Sellers, Travis Smith, et. al.
-//  
-// Licensed under the Apache License, Version 2.0 (the "License"); you may not use
-// this file except in compliance with the License. You may obtain a copy of the 
-// License at 
-// 
-//     http://www.apache.org/licenses/LICENSE-2.0 
-// 
-// Unless required by applicable law or agreed to in writing, software distributed
-// under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR 
-// CONDITIONS OF ANY KIND, either express or implied. See the License for the 
-// specific language governing permissions and limitations under the License.
-namespace MassTransit.NHibernateIntegration
+﻿namespace MassTransit.NHibernateIntegration
 {
     using System;
     using System.Data;
@@ -19,6 +7,7 @@ namespace MassTransit.NHibernateIntegration
     using NHibernate.Engine;
     using NHibernate.SqlTypes;
     using NHibernate.UserTypes;
+
 
     // taken from https://gist.github.com/3075912
     public class BinaryGuidType :
@@ -31,10 +20,16 @@ namespace MassTransit.NHibernateIntegration
 
         public Type ReturnedType => typeof(Guid);
 
-        public new bool Equals(object x, object y) => x != null && x.Equals(y);
+        public new bool Equals(object x, object y)
+        {
+            return x != null && x.Equals(y);
+        }
 
-        public int GetHashCode(object x) => x.GetHashCode();
-        
+        public int GetHashCode(object x)
+        {
+            return x.GetHashCode();
+        }
+
         public object NullSafeGet(DbDataReader rs, string[] names, ISessionImplementor session, object owner)
         {
             var bytes = (byte[])NHibernateUtil.Binary.NullSafeGet(rs, names[0], session);
@@ -43,7 +38,7 @@ namespace MassTransit.NHibernateIntegration
 
             var reorderedBytes = new byte[16];
 
-            for (int i = 0; i < 16; i++)
+            for (var i = 0; i < 16; i++)
                 reorderedBytes[_byteOrder[i]] = bytes[i];
 
             return new Guid(reorderedBytes);
@@ -56,7 +51,7 @@ namespace MassTransit.NHibernateIntegration
                 byte[] bytes = ((Guid)value).ToByteArray();
                 var reorderedBytes = new byte[16];
 
-                for (int i = 0; i < 16; i++)
+                for (var i = 0; i < 16; i++)
                     reorderedBytes[i] = bytes[_byteOrder[i]];
 
                 NHibernateUtil.Binary.NullSafeSet(cmd, reorderedBytes, index, session);
@@ -65,14 +60,26 @@ namespace MassTransit.NHibernateIntegration
                 NHibernateUtil.Binary.NullSafeSet(cmd, null, index, session);
         }
 
-        public object DeepCopy(object value) => value;
+        public object DeepCopy(object value)
+        {
+            return value;
+        }
 
         public bool IsMutable => false;
 
-        public object Replace(object original, object target, object owner) => original;
+        public object Replace(object original, object target, object owner)
+        {
+            return original;
+        }
 
-        public object Assemble(object cached, object owner) => cached;
+        public object Assemble(object cached, object owner)
+        {
+            return cached;
+        }
 
-        public object Disassemble(object value) => value;
+        public object Disassemble(object value)
+        {
+            return value;
+        }
     }
 }

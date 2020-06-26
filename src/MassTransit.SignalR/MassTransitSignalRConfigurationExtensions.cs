@@ -1,133 +1,60 @@
 ﻿namespace MassTransit.SignalR
 {
-    using MassTransit;
-    using MassTransit.ExtensionsDependencyInjectionIntegration;
-    using Microsoft.AspNetCore.SignalR;
     using System;
+    using Configuration.Definitions;
+    using Consumers;
+    using Contracts;
     using Definition;
-    using MassTransit.SignalR.Consumers;
-    using MassTransit.SignalR.Contracts;
-    using MassTransit.MessageData;
+    using ExtensionsDependencyInjectionIntegration;
+    using Microsoft.AspNetCore.SignalR;
+    using Microsoft.Extensions.DependencyInjection;
+    using Microsoft.Extensions.DependencyInjection.Extensions;
+    using Scoping;
+
 
     public static class MassTransitSignalRConfigurationExtensions
     {
-        public static void AddSignalRHubConsumers<THub>(this IServiceCollectionConfigurator configurator)
+        public static void AddSignalRHub<THub>(this IServiceCollectionBusConfigurator busConfigurator,
+            Action<IHubLifetimeManagerOptions<THub>> configureHubLifetimeOptions = null)
             where THub : Hub
         {
-            // Add Registrations for Regular Consumers
-            configurator.AddConsumer<AllConsumer<THub>>();
-            configurator.AddConsumer<ConnectionConsumer<THub>>();
-            configurator.AddConsumer<GroupConsumer<THub>>();
-            configurator.AddConsumer<GroupManagementConsumer<THub>>();
-            configurator.AddConsumer<UserConsumer<THub>>();
+            var options = new HubLifetimeManagerOptions<THub>();
+            configureHubLifetimeOptions?.Invoke(options);
 
-            // Add Registrations for Message Data Consumers
-            configurator.AddConsumer<AllMessageDataConsumer<THub>>();
-            configurator.AddConsumer<ConnectionMessageDataConsumer<THub>>();
-            configurator.AddConsumer<GroupMessageDataConsumer<THub>>();
-            configurator.AddConsumer<GroupManagementConsumer<THub>>();
-            configurator.AddConsumer<UserMessageDataConsumer<THub>>();
+            busConfigurator.Collection.TryAddSingleton<IHubLifetimeScopeProvider, DependencyInjectionHubLifetimeScopeProvider>();
+
+            busConfigurator.Collection.AddSingleton(provider => GetMassTransitHubLifetimeManager(provider, options));
+            busConfigurator.Collection.AddSingleton<HubLifetimeManager<THub>>(sp => sp.GetRequiredService<MassTransitHubLifetimeManager<THub>>());
+
+            busConfigurator.AddRequestClient<GroupManagement<THub>>(options.RequestTimeout);
+
+            RegisterConsumers<THub>(busConfigurator);
         }
 
-        public static void AddSignalRHubEndpoints<THub>(
-            this IBusFactoryConfigurator configurator,
-            IServiceProvider serviceProvider,
-            Action<IReceiveEndpointConfigurator> configureEndpoint = null)
+        static void RegisterConsumers<THub>(IServiceCollectionBusConfigurator busConfigurator)
             where THub : Hub
         {
-            // Get the configuration options
-            var options = serviceProvider.GetService(typeof(MassTransitSignalROptions)) as MassTransitSignalROptions;
+            busConfigurator.Collection.AddSingleton<HubConsumerDefinition<THub>>();
 
-            if (!options.UseMessageData)
-            {
-                configurator.ReceiveEndpoint(new HubEndpointDefinition<THub>(), null, e =>
-                {
-                    configureEndpoint?.Invoke(e);
+            busConfigurator.Collection.TryAddSingleton<IConsumerDefinition<AllConsumer<THub>>, AllConsumerDefinition<THub>>();
+            busConfigurator.Collection.TryAddSingleton<IConsumerDefinition<ConnectionConsumer<THub>>, ConnectionConsumerDefinition<THub>>();
+            busConfigurator.Collection.TryAddSingleton<IConsumerDefinition<GroupConsumer<THub>>, GroupConsumerDefinition<THub>>();
+            busConfigurator.Collection.TryAddSingleton<IConsumerDefinition<GroupManagementConsumer<THub>>, GroupManagementConsumerDefinition<THub>>();
+            busConfigurator.Collection.TryAddSingleton<IConsumerDefinition<UserConsumer<THub>>, UserConsumerDefinition<THub>>();
 
-                    e.ConfigureConsumer<AllConsumer<THub>>(serviceProvider);
-                });
-
-                configurator.ReceiveEndpoint(new HubEndpointDefinition<THub>(), null, e =>
-                {
-                    e.UseMessageData<Connection<THub>>(serviceProvider.GetService(typeof(IMessageDataRepository)) as IMessageDataRepository);
-                    configureEndpoint?.Invoke(e);
-
-                    e.ConfigureConsumer<ConnectionConsumer<THub>>(serviceProvider);
-                });
-
-                configurator.ReceiveEndpoint(new HubEndpointDefinition<THub>(), null, e =>
-                {
-                    e.UseMessageData<Group<THub>>(serviceProvider.GetService(typeof(IMessageDataRepository)) as IMessageDataRepository);
-                    configureEndpoint?.Invoke(e);
-
-                    e.ConfigureConsumer<GroupConsumer<THub>>(serviceProvider);
-                });
-
-                configurator.ReceiveEndpoint(new HubEndpointDefinition<THub>(), null, e =>
-                {
-                    e.UseMessageData<User<THub>>(serviceProvider.GetService(typeof(IMessageDataRepository)) as IMessageDataRepository);
-                    configureEndpoint?.Invoke(e);
-
-                    e.ConfigureConsumer<UserConsumer<THub>>(serviceProvider);
-                });
-            }
-            else
-            {
-                configurator.ReceiveEndpoint(new HubEndpointDefinition<THub>(), null, e =>
-                {
-                    e.UseMessageData<AllMessageData<THub>>(serviceProvider.GetService(typeof(IMessageDataRepository)) as IMessageDataRepository);
-                    configureEndpoint?.Invoke(e);
-
-                    e.ConfigureConsumer<AllMessageDataConsumer<THub>>(serviceProvider);
-                });
-
-                configurator.ReceiveEndpoint(new HubEndpointDefinition<THub>(), null, e =>
-                {
-                    e.UseMessageData<ConnectionMessageData<THub>>(serviceProvider.GetService(typeof(IMessageDataRepository)) as IMessageDataRepository);
-                    configureEndpoint?.Invoke(e);
-
-                    e.ConfigureConsumer<ConnectionMessageDataConsumer<THub>>(serviceProvider);
-                });
-
-                configurator.ReceiveEndpoint(new HubEndpointDefinition<THub>(), null, e =>
-                {
-                    e.UseMessageData<GroupMessageData<THub>>(serviceProvider.GetService(typeof(IMessageDataRepository)) as IMessageDataRepository);
-                    configureEndpoint?.Invoke(e);
-
-                    e.ConfigureConsumer<GroupMessageDataConsumer<THub>>(serviceProvider);
-                });
-
-                configurator.ReceiveEndpoint(new HubEndpointDefinition<THub>(), null, e =>
-                {
-                    e.UseMessageData<UserMessageData<THub>>(serviceProvider.GetService(typeof(IMessageDataRepository)) as IMessageDataRepository);
-                    configureEndpoint?.Invoke(e);
-
-                    e.ConfigureConsumer<UserMessageDataConsumer<THub>>(serviceProvider);
-                });
-            }
-
-            // Common Receive Endpoint
-            configurator.ReceiveEndpoint(new HubEndpointDefinition<THub>(), null, e =>
-            {
-                configureEndpoint?.Invoke(e);
-
-                e.ConfigureConsumer<GroupManagementConsumer<THub>>(serviceProvider);
-            });
+            busConfigurator.AddConsumer<AllConsumer<THub>>();
+            busConfigurator.AddConsumer<ConnectionConsumer<THub>>();
+            busConfigurator.AddConsumer<GroupConsumer<THub>>();
+            busConfigurator.AddConsumer<GroupManagementConsumer<THub>>();
+            busConfigurator.AddConsumer<UserConsumer<THub>>();
         }
 
-        class HubEndpointDefinition<THub> :
-            DefaultEndpointDefinition
+        static MassTransitHubLifetimeManager<THub> GetMassTransitHubLifetimeManager<THub>(IServiceProvider provider, HubLifetimeManagerOptions<THub> options)
             where THub : Hub
         {
-            public HubEndpointDefinition()
-                : base(true)
-            {
-            }
-
-            public override string GetEndpointName(IEndpointNameFormatter formatter)
-            {
-                return formatter.TemporaryEndpoint($"signalr_{typeof(THub).Name}");
-            }
+            var scopeProvider = provider.GetRequiredService<IHubLifetimeScopeProvider>();
+            var resolver = provider.GetRequiredService<IHubProtocolResolver>();
+            return new MassTransitHubLifetimeManager<THub>(options, scopeProvider, resolver);
         }
     }
 }

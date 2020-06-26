@@ -1,18 +1,17 @@
-# Configuring StructureMap
+# StructureMap
 
 The following example shows how to configure a simple StructureMap container, and include the bus in the
 container. The two bus interfaces, `IBus` and `IBusControl`, are included.
 
 A sample project for the container registration code is available on [GitHub](https://github.com/MassTransit/Sample-Containers).
 
-<div class="alert alert-info">
-<b>Note:</b>
-    Consumers should not typically depend upon <i>IBus</i> or <i>IBusControl</i>. A consumer should use the <i>ConsumeContext</i>
-    instead, which has all of the same methods as <i>IBus</i>, but is scoped to the receive endpoint. This ensures that
-    messages can be tracked between consumers, and are sent from the proper address.
-</div>
+::: tip
+Consumers should not typically depend upon <i>IBus</i> or <i>IBusControl</i>. A consumer should use the <i>ConsumeContext</i>
+instead, which has all of the same methods as <i>IBus</i>, but is scoped to the receive endpoint. This ensures that
+messages can be tracked between consumers, and are sent from the proper address.
+:::
 
- ```csharp
+ ```cs
 public static void Main(string[] args)
 {
     var container = new Container(cfg =>
@@ -29,12 +28,12 @@ public static void Main(string[] args)
             x.AddConsumers(typeof(ConsumerOne), typeof(ConsumerTwo));
 
             // add the bus to the container, may need to create Local function
-            x.AddBus(context => Bus.Factory.CreateUsingRabbitMq(cfg =>
+            x.UsingRabbitMq(cfg =>
             {
-                var host = cfg.Host("localhost/");
+                cfg.Host("localhost/");
 
                 cfg.ReceiveEndpoint("customer_update", ec =>
-               {
+                {
                     // Configure a single consumer
                     ec.ConfigureConsumer<UpdateCustomerConsumer>(context);
 

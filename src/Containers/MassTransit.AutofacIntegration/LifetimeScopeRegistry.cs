@@ -1,20 +1,8 @@
-﻿// Copyright 2007-2015 Chris Patterson, Dru Sellers, Travis Smith, et. al.
-//  
-// Licensed under the Apache License, Version 2.0 (the "License"); you may not use
-// this file except in compliance with the License. You may obtain a copy of the 
-// License at 
-// 
-//     http://www.apache.org/licenses/LICENSE-2.0 
-// 
-// Unless required by applicable law or agreed to in writing, software distributed
-// under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR 
-// CONDITIONS OF ANY KIND, either express or implied. See the License for the 
-// specific language governing permissions and limitations under the License.
-namespace MassTransit.AutofacIntegration
+﻿namespace MassTransit.AutofacIntegration
 {
     using System;
     using System.Collections.Concurrent;
-    using System.Collections.Generic;
+    using System.Threading.Tasks;
     using Autofac;
     using Autofac.Core;
     using Autofac.Core.Lifetime;
@@ -24,11 +12,12 @@ namespace MassTransit.AutofacIntegration
     public class LifetimeScopeRegistry<TId> :
         ILifetimeScopeRegistry<TId>
     {
-        readonly Lazy<ILifetimeScope> _defaultScope;
         readonly ILifetimeScopeIdProvider<TId> _currentScopeIdProvider;
+        readonly Lazy<ILifetimeScope> _defaultScope;
         readonly ILifetimeScope _parentScope;
         readonly ConcurrentDictionary<TId, RegisteredLifetimeScope> _scopes;
         readonly object _tag;
+        bool _disposed;
 
         public LifetimeScopeRegistry(ILifetimeScope parentScope, object tag)
             : this(parentScope, tag, new DefaultScopeIdProvider())
@@ -45,9 +34,9 @@ namespace MassTransit.AutofacIntegration
             _defaultScope = new Lazy<ILifetimeScope>(() => _parentScope.BeginLifetimeScope());
         }
 
-        public object ResolveComponent(IComponentRegistration registration, IEnumerable<Parameter> parameters)
+        public object ResolveComponent(ResolveRequest request)
         {
-            return GetCurrentScope().ResolveComponent(registration, parameters);
+            return GetCurrentScope().ResolveComponent(request);
         }
 
         public IComponentRegistry ComponentRegistry => GetCurrentScope().ComponentRegistry;
@@ -81,9 +70,9 @@ namespace MassTransit.AutofacIntegration
         /// </summary>
         public event EventHandler<LifetimeScopeBeginningEventArgs> ChildLifetimeScopeBeginning
         {
-            add { GetCurrentScope().ChildLifetimeScopeBeginning += value; }
+            add => GetCurrentScope().ChildLifetimeScopeBeginning += value;
 
-            remove { GetCurrentScope().ChildLifetimeScopeBeginning -= value; }
+            remove => GetCurrentScope().ChildLifetimeScopeBeginning -= value;
         }
 
         /// <summary>
@@ -91,9 +80,9 @@ namespace MassTransit.AutofacIntegration
         /// </summary>
         public event EventHandler<LifetimeScopeEndingEventArgs> CurrentScopeEnding
         {
-            add { GetCurrentScope().CurrentScopeEnding += value; }
+            add => GetCurrentScope().CurrentScopeEnding += value;
 
-            remove { GetCurrentScope().CurrentScopeEnding -= value; }
+            remove => GetCurrentScope().CurrentScopeEnding -= value;
         }
 
         /// <summary>
@@ -101,9 +90,9 @@ namespace MassTransit.AutofacIntegration
         /// </summary>
         public event EventHandler<ResolveOperationBeginningEventArgs> ResolveOperationBeginning
         {
-            add { GetCurrentScope().ResolveOperationBeginning += value; }
+            add => GetCurrentScope().ResolveOperationBeginning += value;
 
-            remove { GetCurrentScope().ResolveOperationBeginning -= value; }
+            remove => GetCurrentScope().ResolveOperationBeginning -= value;
         }
 
         public ILifetimeScope GetLifetimeScope(TId scopeId)
@@ -121,13 +110,25 @@ namespace MassTransit.AutofacIntegration
 
         public void Dispose()
         {
+            if (_disposed)
+                return;
+
             foreach (var scope in _scopes.Values)
-            {
                 scope.Dispose();
-            }
 
             if (_defaultScope.IsValueCreated)
                 _defaultScope.Value.Dispose();
+        }
+
+        public async ValueTask DisposeAsync()
+        {
+            foreach (var scope in _scopes.Values)
+                await scope.DisposeAsync().ConfigureAwait(false);
+
+            if (_defaultScope.IsValueCreated)
+                await _defaultScope.Value.DisposeAsync().ConfigureAwait(false);
+
+            _disposed = true;
         }
 
         ILifetimeScope GetOrAddLifetimeScope(TId id)
@@ -141,8 +142,7 @@ namespace MassTransit.AutofacIntegration
         /// <returns></returns>
         ILifetimeScope GetCurrentScope()
         {
-            TId scopeId;
-            if (_currentScopeIdProvider.TryGetScopeId(out scopeId))
+            if (_currentScopeIdProvider.TryGetScopeId(out var scopeId))
                 return GetLifetimeScope(scopeId);
 
             return _defaultScope.Value;
@@ -154,14 +154,14 @@ namespace MassTransit.AutofacIntegration
         {
             public bool TryGetScopeId(out TId id)
             {
-                id = default(TId);
+                id = default;
                 return false;
             }
         }
 
 
         class RegisteredLifetimeScope :
-            IDisposable
+            IAsyncDisposable
         {
             readonly LifetimeScopeConfigurator<TId> _configurator;
             readonly TId _id;
@@ -184,6 +184,12 @@ namespace MassTransit.AutofacIntegration
             }
 
             public ILifetimeScope Scope => _scope.Value;
+
+            public async ValueTask DisposeAsync()
+            {
+                if (_scope.IsValueCreated)
+                    await _scope.Value.DisposeAsync().ConfigureAwait(false);
+            }
 
             public void Dispose()
             {

@@ -1,16 +1,4 @@
-﻿// Copyright 2007-2018 Chris Patterson, Dru Sellers, Travis Smith, et. al.
-//
-// Licensed under the Apache License, Version 2.0 (the "License"); you may not use
-// this file except in compliance with the License. You may obtain a copy of the
-// License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software distributed
-// under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
-// CONDITIONS OF ANY KIND, either express or implied. See the License for the
-// specific language governing permissions and limitations under the License.
-namespace MassTransit.Clients
+﻿namespace MassTransit.Clients
 {
     using System;
     using System.Collections.Generic;
@@ -20,6 +8,7 @@ namespace MassTransit.Clients
     using GreenPipes;
     using GreenPipes.Builders;
     using GreenPipes.Configurators;
+    using Metadata;
     using Util;
 
 
@@ -28,28 +17,31 @@ namespace MassTransit.Clients
         IPipe<SendContext<TRequest>>
         where TRequest : class
     {
+        public delegate Task<TRequest> SendRequestCallback(Guid requestId, IPipe<SendContext<TRequest>> pipe, CancellationToken cancellationToken);
+
+
         readonly CancellationToken _cancellationToken;
+        readonly CancellationTokenSource _cancellationTokenSource;
         readonly ClientFactoryContext _context;
-        readonly Task<TRequest> _message;
+        readonly TaskCompletionSource<TRequest> _message;
         readonly IBuildPipeConfigurator<SendContext<TRequest>> _pipeConfigurator;
         readonly TaskCompletionSource<bool> _readyToSend;
         readonly Guid _requestId;
-        readonly IRequestSendEndpoint<TRequest> _requestSendEndpoint;
         readonly Dictionary<Type, HandlerConnectHandle> _responseHandlers;
         readonly Task _send;
         readonly TaskCompletionSource<SendContext<TRequest>> _sendContext;
-        readonly CancellationTokenSource _cancellationTokenSource;
+        readonly SendRequestCallback _sendRequestCallback;
         readonly TaskScheduler _taskScheduler;
+        int _faultedOrCanceled;
         CancellationTokenRegistration _registration;
         Timer _timeoutTimer;
         RequestTimeout _timeToLive;
 
-        public ClientRequestHandle(ClientFactoryContext context, IRequestSendEndpoint<TRequest> requestSendEndpoint, Task<TRequest> message,
-            CancellationToken cancellationToken = default, RequestTimeout timeout = default, Guid? requestId = default, TaskScheduler taskScheduler = default)
+        public ClientRequestHandle(ClientFactoryContext context, SendRequestCallback sendRequestCallback, CancellationToken cancellationToken = default,
+            RequestTimeout timeout = default, Guid? requestId = default, TaskScheduler taskScheduler = default)
         {
             _context = context;
-            _message = message;
-            _requestSendEndpoint = requestSendEndpoint;
+            _sendRequestCallback = sendRequestCallback;
             _cancellationToken = cancellationToken;
 
             var requestTimeout = timeout.HasValue ? timeout : _context.DefaultTimeout.HasValue ? _context.DefaultTimeout.Value : RequestTimeout.Default;
@@ -62,9 +54,10 @@ namespace MassTransit.Clients
                     ? TaskScheduler.Default
                     : TaskScheduler.FromCurrentSynchronizationContext());
 
+            _message = new TaskCompletionSource<TRequest>();
             _pipeConfigurator = new PipeConfigurator<SendContext<TRequest>>();
-            _sendContext = new TaskCompletionSource<SendContext<TRequest>>();
-            _readyToSend = new TaskCompletionSource<bool>();
+            _sendContext = TaskUtil.GetTask<SendContext<TRequest>>();
+            _readyToSend = TaskUtil.GetTask<bool>();
             _cancellationTokenSource = new CancellationTokenSource();
             _responseHandlers = new Dictionary<Type, HandlerConnectHandle>();
 
@@ -75,7 +68,9 @@ namespace MassTransit.Clients
 
             _send = SendRequest();
 
+        #pragma warning disable 4014
             HandleFault();
+        #pragma warning restore 4014
         }
 
         async Task IPipe<SendContext<TRequest>>.Send(SendContext<TRequest> context)
@@ -109,16 +104,10 @@ namespace MassTransit.Clients
 
         public void Cancel()
         {
-            _readyToSend.TrySetCanceled();
-            _sendContext.TrySetCanceled();
+            if (Interlocked.CompareExchange(ref _faultedOrCanceled, 1, 0) != 0)
+                return;
 
-            _cancellationTokenSource.Cancel();
-
-            lock (_responseHandlers)
-            {
-                foreach (var handler in _responseHandlers.Values)
-                    handler.TrySetCanceled();
-            }
+            Task.Factory.StartNew(CancelAndDispose, CancellationToken.None, TaskCreationOptions.None, _taskScheduler);
         }
 
         void IPipeConfigurator<SendContext<TRequest>>.AddPipeSpecification(IPipeSpecification<SendContext<TRequest>> specification)
@@ -138,31 +127,19 @@ namespace MassTransit.Clients
 
         public void Dispose()
         {
-            Cancel();
-
-            lock (_responseHandlers)
-            {
-                foreach (var handle in _responseHandlers.Values)
-                    handle.Disconnect();
-            }
-
-            _timeoutTimer?.Dispose();
-            _timeoutTimer = null;
-
-            _registration.Dispose();
-
-//            _cancellationTokenSource.Dispose();
+            if (Interlocked.CompareExchange(ref _faultedOrCanceled, 1, 0) == 0)
+                CancelAndDispose();
         }
 
-        Task<TRequest> RequestHandle<TRequest>.Message => _message;
+        Task<TRequest> RequestHandle<TRequest>.Message => _message.Task;
 
         async Task SendRequest()
         {
             try
             {
-                var message = await _message.ConfigureAwait(false);
+                var message = await _sendRequestCallback(_requestId, this, _cancellationTokenSource.Token).ConfigureAwait(false);
 
-                await _requestSendEndpoint.Send(message, this, _cancellationTokenSource.Token).ConfigureAwait(false);
+                _message.TrySetResult(message);
             }
             catch (RequestException exception)
             {
@@ -192,34 +169,28 @@ namespace MassTransit.Clients
         Task<Response<T>> Response<T>(MessageHandler<T> handler = null, Action<IHandlerConfigurator<T>> configure = null)
             where T : class
         {
-            lock (_responseHandlers)
-            {
-                if (_responseHandlers.ContainsKey(typeof(T)))
-                    throw new RequestException($"Only one handler of type {TypeMetadataCache<T>.ShortName} can be registered");
-            }
+            if (_responseHandlers.ContainsKey(typeof(T)))
+                throw new RequestException($"Only one handler of type {TypeMetadataCache<T>.ShortName} can be registered");
 
             var configurator = new ResponseHandlerConfigurator<T>(_taskScheduler, handler, _send);
 
             configure?.Invoke(configurator);
 
-            lock (_responseHandlers)
-            {
-                if (_cancellationToken.IsCancellationRequested)
-                    return TaskUtil.Cancelled<Response<T>>();
+            if (_cancellationToken.IsCancellationRequested)
+                return TaskUtil.Cancelled<Response<T>>();
 
-                HandlerConnectHandle<T> handle = configurator.Connect(_context, _requestId);
+            HandlerConnectHandle<T> handle = configurator.Connect(_context, _requestId);
 
-                _responseHandlers.Add(typeof(T), handle);
+            _responseHandlers.Add(typeof(T), handle);
 
-                return handle.Task;
-            }
+            return handle.Task;
         }
 
         async Task HandleFault()
         {
             try
             {
-                var response = await Response<Fault<TRequest>>(FaultHandler).ConfigureAwait(false);
+                await Response<Fault<TRequest>>(FaultHandler).ConfigureAwait(false);
             }
             catch
             {
@@ -241,26 +212,72 @@ namespace MassTransit.Clients
 
         void Fail(Exception exception)
         {
-            _readyToSend.TrySetException(exception);
-            _sendContext.TrySetException(exception);
+            if (Interlocked.CompareExchange(ref _faultedOrCanceled, 1, 0) != 0)
+                return;
 
-            lock (_responseHandlers)
+            void HandleFail()
             {
+                _registration.Dispose();
+
+                DisposeTimer();
+
+                _readyToSend.TrySetException(exception);
+
+                var cancel = _sendContext.TrySetException(exception);
+                if (cancel)
+                    _cancellationTokenSource.Cancel();
+
+                _message.TrySetException(exception);
+
                 foreach (var handle in _responseHandlers.Values)
+                {
                     handle.TrySetException(exception);
+                    handle.Disconnect();
+                }
             }
 
-            _cancellationTokenSource.Cancel();
+            Task.Factory.StartNew(HandleFail, CancellationToken.None, TaskCreationOptions.None, _taskScheduler);
+        }
+
+        void CancelAndDispose()
+        {
+            _registration.Dispose();
+
+            DisposeTimer();
+
+            _readyToSend.TrySetCanceled();
+
+            var cancel = _sendContext.TrySetCanceled();
+            if (cancel)
+                _cancellationTokenSource.Cancel();
+
+            _message.TrySetCanceled();
+
+            foreach (var handle in _responseHandlers.Values)
+            {
+                handle.TrySetCanceled();
+                handle.Disconnect();
+            }
         }
 
         void TimeoutExpired(object state)
         {
-            _timeoutTimer?.Dispose();
-            _timeoutTimer = null;
-
             var timeoutException = new RequestTimeoutException(_requestId.ToString());
 
             Fail(timeoutException);
+        }
+
+        void DisposeTimer()
+        {
+            try
+            {
+                _timeoutTimer?.Dispose();
+            }
+            catch (ObjectDisposedException)
+            {
+            }
+
+            _timeoutTimer = null;
         }
     }
 }

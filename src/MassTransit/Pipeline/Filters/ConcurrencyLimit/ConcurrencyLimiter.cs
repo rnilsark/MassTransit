@@ -3,8 +3,8 @@ namespace MassTransit.Pipeline.Filters.ConcurrencyLimit
     using System;
     using System.Threading;
     using System.Threading.Tasks;
+    using Context;
     using Contracts;
-    using Logging;
 
 
     /// <summary>
@@ -14,11 +14,9 @@ namespace MassTransit.Pipeline.Filters.ConcurrencyLimit
     public class ConcurrencyLimiter :
         IConcurrencyLimiter
     {
-        static readonly ILog _log = Logger.Get<ConcurrencyLimiter>();
-
-        readonly int _concurrencyLimit;
         readonly string _id;
         readonly SemaphoreSlim _limit;
+        int _concurrencyLimit;
         DateTime _lastUpdated;
 
         public ConcurrencyLimiter(int concurrencyLimit, string id = null)
@@ -57,12 +55,26 @@ namespace MassTransit.Pipeline.Filters.ConcurrencyLimit
 
                         var previousLimit = _concurrencyLimit;
                         if (concurrencyLimit > previousLimit)
-                            _limit.Release(concurrencyLimit - previousLimit);
-                        else
+                        {
+                            var releaseCount = concurrencyLimit - previousLimit;
+
+                            _limit.Release(releaseCount);
+
+                            Interlocked.Add(ref _concurrencyLimit, releaseCount);
+
+                            _lastUpdated = context.Message.Timestamp;
+                        }
+                        else if (concurrencyLimit < previousLimit)
+                        {
                             for (; previousLimit > concurrencyLimit; previousLimit--)
+                            {
                                 await _limit.WaitAsync().ConfigureAwait(false);
 
-                        _lastUpdated = context.Message.Timestamp;
+                                Interlocked.Decrement(ref _concurrencyLimit);
+
+                                _lastUpdated = context.Message.Timestamp;
+                            }
+                        }
 
                         await context.RespondAsync<ConcurrencyLimitUpdated>(new
                         {
@@ -71,13 +83,12 @@ namespace MassTransit.Pipeline.Filters.ConcurrencyLimit
                             context.Message.ConcurrencyLimit
                         }).ConfigureAwait(false);
 
-                        if (_log.IsDebugEnabled)
-                            _log.Debug($"Set Consumer Limit: {context.Message.ConcurrencyLimit} ({context.Message.Id})");
+                        LogContext.Debug?.Log("Set Consumer Limit: {ConcurrencyLimit} ({CommandId})", context.Message.ConcurrencyLimit, context.Message.Id);
                     }
                     catch (Exception exception)
                     {
-                        if (_log.IsErrorEnabled)
-                            _log.Error($"Set Consumer Limit Failed: {context.Message.ConcurrencyLimit} ({context.Message.Id})", exception);
+                        LogContext.Error?.Log(exception, "Set Consumer Limit failed: {ConcurrencyLimit} ({CommandId})", context.Message.ConcurrencyLimit,
+                            context.Message.Id);
 
                         throw;
                     }

@@ -1,27 +1,17 @@
-// Copyright 2007-2018 Chris Patterson, Dru Sellers, Travis Smith, et. al.
-//  
-// Licensed under the Apache License, Version 2.0 (the "License"); you may not use
-// this file except in compliance with the License. You may obtain a copy of the 
-// License at 
-// 
-//     http://www.apache.org/licenses/LICENSE-2.0 
-// 
-// Unless required by applicable law or agreed to in writing, software distributed
-// under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR 
-// CONDITIONS OF ANY KIND, either express or implied. See the License for the 
-// specific language governing permissions and limitations under the License.
 namespace MassTransit.ConsumePipeSpecifications
 {
     using System;
     using System.Collections.Concurrent;
     using System.Collections.Generic;
     using System.Linq;
+    using Automatonymous;
     using ConsumeConfigurators;
     using Context.Converters;
+    using Courier;
     using GreenPipes;
     using GreenPipes.Builders;
+    using GreenPipes.Configurators;
     using GreenPipes.Filters;
-    using Metadata;
     using Pipeline;
     using Pipeline.Pipes;
     using Saga;
@@ -32,7 +22,8 @@ namespace MassTransit.ConsumePipeSpecifications
         IConsumePipeConfigurator,
         IConsumePipeSpecification
     {
-        readonly IList<IPipeSpecification<ConsumeContext>> _consumeContextSpecifications;
+        readonly ActivityConfigurationObservable _activityObservers;
+        readonly IBuildPipeConfigurator<ConsumeContext> _consumePipeConfigurator;
         readonly ConsumerConfigurationObservable _consumerObservers;
         readonly HandlerConfigurationObservable _handlerObservers;
         readonly object _lock = new object();
@@ -44,13 +35,16 @@ namespace MassTransit.ConsumePipeSpecifications
         public ConsumePipeSpecification()
         {
             _specifications = new List<IPipeSpecification<ConsumeContext>>();
-            _consumeContextSpecifications = new List<IPipeSpecification<ConsumeContext>>();
+            _consumePipeConfigurator = new PipeConfigurator<ConsumeContext>();
             _messageSpecifications = new ConcurrentDictionary<Type, IMessageConsumePipeSpecification>();
             _observers = new ConsumePipeSpecificationObservable();
 
             _consumerObservers = new ConsumerConfigurationObservable();
             _sagaObservers = new SagaConfigurationObservable();
             _handlerObservers = new HandlerConfigurationObservable();
+            _activityObservers = new ActivityConfigurationObservable();
+
+            AutoStart = true;
         }
 
         public void AddPipeSpecification(IPipeSpecification<ConsumeContext> specification)
@@ -73,10 +67,15 @@ namespace MassTransit.ConsumePipeSpecifications
         {
             return _sagaObservers.Connect(observer);
         }
-        
+
         public ConnectHandle ConnectHandlerConfigurationObserver(IHandlerConfigurationObserver observer)
         {
             return _handlerObservers.Connect(observer);
+        }
+
+        public ConnectHandle ConnectActivityConfigurationObserver(IActivityConfigurationObserver observer)
+        {
+            return _activityObservers.Connect(observer);
         }
 
         public void AddPipeSpecification<T>(IPipeSpecification<ConsumeContext<T>> specification)
@@ -89,8 +88,10 @@ namespace MassTransit.ConsumePipeSpecifications
 
         public void AddPrePipeSpecification(IPipeSpecification<ConsumeContext> specification)
         {
-            _consumeContextSpecifications.Add(specification);
+            _consumePipeConfigurator.AddPipeSpecification(specification);
         }
+
+        public bool AutoStart { get; set; }
 
         public void ConsumerConfigured<TConsumer>(IConsumerConfigurator<TConsumer> configurator)
             where TConsumer : class
@@ -111,6 +112,12 @@ namespace MassTransit.ConsumePipeSpecifications
             _sagaObservers.SagaConfigured(configurator);
         }
 
+        public void StateMachineSagaConfigured<TInstance>(ISagaConfigurator<TInstance> configurator, SagaStateMachine<TInstance> stateMachine)
+            where TInstance : class, ISaga, SagaStateMachineInstance
+        {
+            _sagaObservers.StateMachineSagaConfigured(configurator, stateMachine);
+        }
+
         public void SagaMessageConfigured<TSaga, TMessage>(ISagaMessageConfigurator<TSaga, TMessage> configurator)
             where TSaga : class, ISaga
             where TMessage : class
@@ -124,10 +131,37 @@ namespace MassTransit.ConsumePipeSpecifications
             _handlerObservers.HandlerConfigured(configurator);
         }
 
+        public void ActivityConfigured<TActivity, TArguments>(IExecuteActivityConfigurator<TActivity, TArguments> configurator, Uri compensateAddress)
+            where TActivity : class, IExecuteActivity<TArguments>
+            where TArguments : class
+        {
+            _activityObservers.ActivityConfigured(configurator, compensateAddress);
+        }
+
+        public void ExecuteActivityConfigured<TActivity, TArguments>(IExecuteActivityConfigurator<TActivity, TArguments> configurator)
+            where TActivity : class, IExecuteActivity<TArguments>
+            where TArguments : class
+        {
+            _activityObservers.ExecuteActivityConfigured(configurator);
+        }
+
+        public void CompensateActivityConfigured<TActivity, TLog>(ICompensateActivityConfigurator<TActivity, TLog> configurator)
+            where TActivity : class, ICompensateActivity<TLog>
+            where TLog : class
+        {
+            _activityObservers.CompensateActivityConfigured(configurator);
+        }
+
         public IEnumerable<ValidationResult> Validate()
         {
-            return _specifications.SelectMany(x => x.Validate())
-                .Concat(_messageSpecifications.Values.SelectMany(x => x.Validate()));
+            foreach (var result in _specifications.SelectMany(x => x.Validate()))
+                yield return result;
+
+            foreach (var result in _consumePipeConfigurator.Validate())
+                yield return result;
+
+            foreach (var result in _messageSpecifications.Values.SelectMany(x => x.Validate()))
+                yield return result;
         }
 
         public IMessageConsumePipeSpecification<T> GetMessageSpecification<T>()
@@ -147,13 +181,9 @@ namespace MassTransit.ConsumePipeSpecifications
         {
             var filter = new DynamicFilter<ConsumeContext, Guid>(new ConsumeContextConverterFactory(), GetRequestId);
 
-            var builder = new PipeBuilder<ConsumeContext>();
-            foreach (IPipeSpecification<ConsumeContext> specification in _consumeContextSpecifications)
-                specification.Apply(builder);
+            _consumePipeConfigurator.UseFilter(filter);
 
-            builder.AddFilter(filter);
-
-            return new ConsumePipe(filter, builder.Build());
+            return new ConsumePipe(this, filter, _consumePipeConfigurator.Build(), AutoStart);
         }
 
         static Guid GetRequestId(ConsumeContext context)
@@ -166,39 +196,12 @@ namespace MassTransit.ConsumePipeSpecifications
         {
             var specification = new MessageConsumePipeSpecification<T>();
 
-            foreach (IPipeSpecification<ConsumeContext> pipeSpecification in _specifications)
-                specification.AddPipeSpecification(pipeSpecification);
+            for (var index = 0; index < _specifications.Count; index++)
+                specification.AddPipeSpecification(_specifications[index]);
 
             _observers.MessageSpecificationCreated(specification);
 
-            var connector = new ImplementedMessageTypeConnector<T>(this, specification);
-
-            ImplementedMessageTypeCache<T>.EnumerateImplementedTypes(connector);
-
             return specification;
-        }
-
-
-        class ImplementedMessageTypeConnector<TMessage> :
-            IImplementedMessageType
-            where TMessage : class
-        {
-            readonly MessageConsumePipeSpecification<TMessage> _messageSpecification;
-            readonly IConsumePipeSpecification _specification;
-
-            public ImplementedMessageTypeConnector(IConsumePipeSpecification specification, MessageConsumePipeSpecification<TMessage> messageSpecification)
-            {
-                _specification = specification;
-                _messageSpecification = messageSpecification;
-            }
-
-            public void ImplementsMessageType<T>(bool direct)
-                where T : class
-            {
-                IMessageConsumePipeSpecification<T> implementedTypeSpecification = _specification.GetMessageSpecification<T>();
-
-                _messageSpecification.AddImplementedMessageSpecification(implementedTypeSpecification);
-            }
         }
     }
 }

@@ -1,61 +1,127 @@
-﻿// Copyright 2007-2017 Chris Patterson, Dru Sellers, Travis Smith, et. al.
-//  
-// Licensed under the Apache License, Version 2.0 (the "License"); you may not use
-// this file except in compliance with the License. You may obtain a copy of the 
-// License at 
-// 
-//     http://www.apache.org/licenses/LICENSE-2.0 
-// 
-// Unless required by applicable law or agreed to in writing, software distributed
-// under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR 
-// CONDITIONS OF ANY KIND, either express or implied. See the License for the 
-// specific language governing permissions and limitations under the License.
 namespace MassTransit.Context
 {
-    public class PublishContextProxy :
-        SendContextProxy,
-        PublishContext
-    {
-        readonly SendContext _context;
-
-        public PublishContextProxy(SendContext context)
-            : base(context)
-        {
-            _context = context;
-
-            _context.GetOrAddPayload<PublishContext>(() => this);
-        }
-
-        bool PublishContext.Mandatory { get; set; }
-
-        SendContext<T> SendContext.CreateProxy<T>(T message)
-        {
-            return new PublishContextProxy<T>(_context, message);
-        }
-    }
+    using System;
+    using System.Net.Mime;
+    using GreenPipes;
 
 
     public class PublishContextProxy<TMessage> :
-        SendContextProxy<TMessage>,
-        PublishContext<TMessage>
+        PublishContextProxy
         where TMessage : class
     {
-        readonly SendContext _context;
-
-        public PublishContextProxy(SendContext context, TMessage message)
-            : base(context, message)
+        public PublishContextProxy(PublishContext context, TMessage message)
+            : base(context)
         {
-            _context = context;
-
-            _context.GetOrAddPayload<PublishContext>(() => this);
-            _context.GetOrAddPayload<PublishContext<TMessage>>(() => this);
+            Message = message;
         }
 
-        bool PublishContext.Mandatory { get; set; }
+        public TMessage Message { get; }
+    }
 
-        SendContext<T> SendContext.CreateProxy<T>(T message)
+
+    public class PublishContextProxy :
+        ProxyPipeContext
+    {
+        readonly PublishContext _context;
+
+        protected PublishContextProxy(PublishContext context)
+            : base(context)
         {
-            return new PublishContextProxy<T>(_context, message);
+            _context = context;
+        }
+
+        public Uri SourceAddress
+        {
+            get => _context.SourceAddress;
+            set => _context.SourceAddress = value;
+        }
+
+        public Uri DestinationAddress
+        {
+            get => _context.DestinationAddress;
+            set => _context.DestinationAddress = value;
+        }
+
+        public Uri ResponseAddress
+        {
+            get => _context.ResponseAddress;
+            set => _context.ResponseAddress = value;
+        }
+
+        public Uri FaultAddress
+        {
+            get => _context.FaultAddress;
+            set => _context.FaultAddress = value;
+        }
+
+        public Guid? RequestId
+        {
+            get => _context.RequestId;
+            set => _context.RequestId = value;
+        }
+
+        public Guid? MessageId
+        {
+            get => _context.MessageId;
+            set => _context.MessageId = value;
+        }
+
+        public Guid? CorrelationId
+        {
+            get => _context.CorrelationId;
+            set => _context.CorrelationId = value;
+        }
+
+        public Guid? ConversationId
+        {
+            get => _context.ConversationId;
+            set => _context.ConversationId = value;
+        }
+
+        public Guid? InitiatorId
+        {
+            get => _context.InitiatorId;
+            set => _context.InitiatorId = value;
+        }
+
+        public Guid? ScheduledMessageId
+        {
+            get => _context.ScheduledMessageId;
+            set => _context.ScheduledMessageId = value;
+        }
+
+        public SendHeaders Headers => _context.Headers;
+
+        public TimeSpan? TimeToLive
+        {
+            get => _context.TimeToLive;
+            set => _context.TimeToLive = value;
+        }
+
+        public DateTime? SentTime => _context.SentTime;
+
+        public ContentType ContentType
+        {
+            get => _context.ContentType;
+            set => _context.ContentType = value;
+        }
+
+        public bool Durable
+        {
+            get => _context.Durable;
+            set => _context.Durable = value;
+        }
+
+        public IMessageSerializer Serializer
+        {
+            get => _context.Serializer;
+            set => _context.Serializer = value;
+        }
+
+        public bool Mandatory
+        {
+            get => _context.GetPayload<PublishContext>().Mandatory;
+            set => _context.GetPayload<PublishContext>().Mandatory = value;
         }
     }
 }

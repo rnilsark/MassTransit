@@ -1,47 +1,52 @@
-﻿// Copyright 2007-2018 Chris Patterson, Dru Sellers, Travis Smith, et. al.
-//
-// Licensed under the Apache License, Version 2.0 (the "License"); you may not use
-// this file except in compliance with the License. You may obtain a copy of the
-// License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software distributed
-// under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
-// CONDITIONS OF ANY KIND, either express or implied. See the License for the
-// specific language governing permissions and limitations under the License.
-namespace MassTransit.Clients
+﻿namespace MassTransit.Clients
 {
+    using System;
     using System.Threading;
     using System.Threading.Tasks;
+    using Context;
     using GreenPipes;
     using Initializers;
 
 
-    public class PublishRequestSendEndpoint<T> :
-        IRequestSendEndpoint<T>
-        where T : class
+    public class PublishRequestSendEndpoint<TRequest> :
+        IRequestSendEndpoint<TRequest>
+        where TRequest : class
     {
-        readonly IPublishEndpoint _endpoint;
+        readonly ConsumeContext _consumeContext;
+        readonly IPublishEndpointProvider _provider;
 
-        public PublishRequestSendEndpoint(IPublishEndpoint endpoint)
+        public PublishRequestSendEndpoint(IPublishEndpointProvider provider, ConsumeContext consumeContext)
         {
-            _endpoint = endpoint;
+            _provider = provider;
+            _consumeContext = consumeContext;
         }
 
-        public async Task<T> CreateMessage(object values, CancellationToken cancellationToken)
+        public async Task<TRequest> Send(Guid requestId, object values, IPipe<SendContext<TRequest>> pipe, CancellationToken cancellationToken)
         {
-            var initializer = MessageInitializerCache<T>.GetInitializer(values.GetType());
+            var endpoint = await _provider.GetPublishSendEndpoint<TRequest>().ConfigureAwait(false);
 
-            if (_endpoint is ConsumeContext context)
-                return (await initializer.Initialize(initializer.Create(context), values).ConfigureAwait(false)).Message;
+            IMessageInitializer<TRequest> initializer = MessageInitializerCache<TRequest>.GetInitializer(values.GetType());
 
-            return (await initializer.Initialize(values, cancellationToken).ConfigureAwait(false)).Message;
+            if (_consumeContext != null)
+            {
+                InitializeContext<TRequest> initializeContext = initializer.Create(_consumeContext);
+
+                return await initializer.Send(endpoint, initializeContext, values, new ConsumeSendPipeAdapter<TRequest>(_consumeContext, pipe, requestId))
+                    .ConfigureAwait(false);
+            }
+
+            return await initializer.Send(endpoint, values, pipe, cancellationToken).ConfigureAwait(false);
         }
 
-        public Task Send(T message, IPipe<SendContext<T>> pipe, CancellationToken cancellationToken)
+        public async Task Send(Guid requestId, TRequest message, IPipe<SendContext<TRequest>> pipe, CancellationToken cancellationToken)
         {
-            return _endpoint.Publish(message, pipe, cancellationToken);
+            var endpoint = await _provider.GetPublishSendEndpoint<TRequest>().ConfigureAwait(false);
+
+            IPipe<SendContext<TRequest>> consumePipe = _consumeContext != null
+                ? new ConsumeSendPipeAdapter<TRequest>(_consumeContext, pipe, requestId)
+                : pipe;
+
+            await endpoint.Send(message, consumePipe, cancellationToken).ConfigureAwait(false);
         }
     }
 }

@@ -1,18 +1,8 @@
-// Copyright 2007-2019 Chris Patterson, Dru Sellers, Travis Smith, et. al.
-//
-// Licensed under the Apache License, Version 2.0 (the "License"); you may not use
-// this file except in compliance with the License. You may obtain a copy of the
-// License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software distributed
-// under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
-// CONDITIONS OF ANY KIND, either express or implied. See the License for the
-// specific language governing permissions and limitations under the License.
 namespace MassTransit
 {
     using System;
+    using Automatonymous;
+    using Automatonymous.SagaConfigurators;
     using Castle.MicroKernel;
     using Castle.MicroKernel.Registration;
     using Castle.Windsor;
@@ -20,6 +10,7 @@ namespace MassTransit
     using Courier;
     using Saga;
     using Scoping;
+    using WindsorIntegration.Configuration;
     using WindsorIntegration.ScopeProviders;
 
 
@@ -61,6 +52,46 @@ namespace MassTransit
         }
 
         /// <summary>
+        /// Connect a consumer with a consumer factory method
+        /// </summary>
+        /// <typeparam name="TConsumer"></typeparam>
+        /// <typeparam name="TMessage"></typeparam>
+        /// <param name="configurator"></param>
+        /// <param name="kernel"></param>
+        /// <param name="configure"></param>
+        /// <returns></returns>
+        public static void Consumer<TConsumer, TMessage>(this IBatchConfigurator<TMessage> configurator, IKernel kernel,
+            Action<IConsumerMessageConfigurator<TConsumer, Batch<TMessage>>> configure = null)
+            where TConsumer : class, IConsumer<Batch<TMessage>>
+            where TMessage : class
+        {
+            IConsumerScopeProvider scopeProvider = new WindsorConsumerScopeProvider(kernel);
+
+            IConsumerFactory<TConsumer> consumerFactory = new ScopeConsumerFactory<TConsumer>(scopeProvider);
+
+            configurator.Consumer(consumerFactory, configure);
+        }
+
+        /// <summary>
+        /// Connect a consumer with a consumer factory method
+        /// </summary>
+        /// <typeparam name="TConsumer"></typeparam>
+        /// <typeparam name="TMessage"></typeparam>
+        /// <param name="configurator"></param>
+        /// <param name="container"></param>
+        /// <param name="configure"></param>
+        /// <returns></returns>
+        public static void Consumer<TConsumer, TMessage>(this IBatchConfigurator<TMessage> configurator, IWindsorContainer container,
+            Action<IConsumerMessageConfigurator<TConsumer, Batch<TMessage>>> configure = null)
+            where TConsumer : class, IConsumer<Batch<TMessage>>
+            where TMessage : class
+        {
+            RegisterScopedContextProviderIfNotPresent(container);
+
+            Consumer(configurator, container.Kernel, configure);
+        }
+
+        /// <summary>
         /// Registers a saga using the container that has the repository resolved from the container
         /// </summary>
         /// <typeparam name="T"></typeparam>
@@ -73,11 +104,7 @@ namespace MassTransit
         {
             var repository = kernel.Resolve<ISagaRepository<T>>();
 
-            ISagaScopeProvider<T> scopeProvider = new WindsorSagaScopeProvider<T>(kernel);
-
-            var sagaRepository = new ScopeSagaRepository<T>(repository, scopeProvider);
-
-            configurator.Saga(sagaRepository, configure);
+            configurator.Saga(repository, configure);
         }
 
         /// <summary>
@@ -96,9 +123,89 @@ namespace MassTransit
             Saga(configurator, container.Kernel, configure);
         }
 
+        /// <summary>
+        /// Subscribe a state machine saga to the endpoint
+        /// </summary>
+        /// <typeparam name="TInstance">The state machine instance type</typeparam>
+        /// <param name="configurator"></param>
+        /// <param name="stateMachine">The state machine</param>
+        /// <param name="kernel">The Windsor Lifetime container to resolve the repository</param>
+        /// <param name="configure">Optionally configure the saga</param>
+        /// <returns></returns>
+        public static void StateMachineSaga<TInstance>(this IReceiveEndpointConfigurator configurator, SagaStateMachine<TInstance> stateMachine,
+            IKernel kernel, Action<ISagaConfigurator<TInstance>> configure = null)
+            where TInstance : class, SagaStateMachineInstance
+        {
+            var repository = kernel.Resolve<ISagaRepository<TInstance>>();
+
+            var stateMachineConfigurator = new StateMachineSagaConfigurator<TInstance>(stateMachine, repository, configurator);
+
+            configure?.Invoke(stateMachineConfigurator);
+
+            configurator.AddEndpointSpecification(stateMachineConfigurator);
+        }
+
+        /// <summary>
+        /// Subscribe a state machine saga to the endpoint
+        /// </summary>
+        /// <typeparam name="TInstance">The state machine instance type</typeparam>
+        /// <param name="configurator"></param>
+        /// <param name="stateMachine">The state machine</param>
+        /// <param name="container">The Windsor Lifetime container to resolve the repository</param>
+        /// <param name="configure">Optionally configure the saga</param>
+        /// <returns></returns>
+        public static void StateMachineSaga<TInstance>(this IReceiveEndpointConfigurator configurator, SagaStateMachine<TInstance> stateMachine,
+            IWindsorContainer container, Action<ISagaConfigurator<TInstance>> configure = null)
+            where TInstance : class, SagaStateMachineInstance
+        {
+            RegisterScopedContextProviderIfNotPresent(container);
+
+            StateMachineSaga(configurator, stateMachine, container.Kernel, configure);
+        }
+
+        /// <summary>
+        /// Subscribe a state machine saga to the endpoint
+        /// </summary>
+        /// <typeparam name="TInstance">The state machine instance type</typeparam>
+        /// <param name="configurator"></param>
+        /// <param name="kernel">The Windsor Lifetime Container to resolve the repository</param>
+        /// <param name="configure">Optionally configure the saga</param>
+        /// <returns></returns>
+        public static void StateMachineSaga<TInstance>(this IReceiveEndpointConfigurator configurator, IKernel kernel,
+            Action<ISagaConfigurator<TInstance>> configure = null)
+            where TInstance : class, SagaStateMachineInstance
+        {
+            SagaStateMachine<TInstance> stateMachine = kernel.ResolveSagaStateMachine<TInstance>();
+
+            StateMachineSaga(configurator, stateMachine, kernel, configure);
+        }
+
+        /// <summary>
+        /// Subscribe a state machine saga to the endpoint
+        /// </summary>
+        /// <typeparam name="TInstance">The state machine instance type</typeparam>
+        /// <param name="configurator"></param>
+        /// <param name="container">The Windsor Lifetime Container to resolve the repository</param>
+        /// <param name="configure">Optionally configure the saga</param>
+        /// <returns></returns>
+        public static void StateMachineSaga<TInstance>(this IReceiveEndpointConfigurator configurator, IWindsorContainer container,
+            Action<ISagaConfigurator<TInstance>> configure = null)
+            where TInstance : class, SagaStateMachineInstance
+        {
+            RegisterScopedContextProviderIfNotPresent(container);
+
+            StateMachineSaga(configurator, container.Kernel, configure);
+        }
+
+        static SagaStateMachine<TInstance> ResolveSagaStateMachine<TInstance>(this IKernel kernel)
+            where TInstance : class, SagaStateMachineInstance
+        {
+            return kernel.Resolve<SagaStateMachine<TInstance>>();
+        }
+
         public static void ExecuteActivityHost<TActivity, TArguments>(this IReceiveEndpointConfigurator configurator, Uri compensateAddress, IKernel kernel,
             Action<IExecuteActivityConfigurator<TActivity, TArguments>> configure = null)
-            where TActivity : class, ExecuteActivity<TArguments>
+            where TActivity : class, IExecuteActivity<TArguments>
             where TArguments : class
         {
             var executeActivityScopeProvider = new WindsorExecuteActivityScopeProvider<TActivity, TArguments>(kernel);
@@ -110,7 +217,7 @@ namespace MassTransit
 
         public static void ExecuteActivityHost<TActivity, TArguments>(this IReceiveEndpointConfigurator configurator, Uri compensateAddress,
             IWindsorContainer container, Action<IExecuteActivityConfigurator<TActivity, TArguments>> configure = null)
-            where TActivity : class, ExecuteActivity<TArguments>
+            where TActivity : class, IExecuteActivity<TArguments>
             where TArguments : class
         {
             RegisterScopedContextProviderIfNotPresent(container);
@@ -120,7 +227,7 @@ namespace MassTransit
 
         public static void ExecuteActivityHost<TActivity, TArguments>(this IReceiveEndpointConfigurator configurator, IKernel kernel,
             Action<IExecuteActivityConfigurator<TActivity, TArguments>> configure = null)
-            where TActivity : class, ExecuteActivity<TArguments>
+            where TActivity : class, IExecuteActivity<TArguments>
             where TArguments : class
         {
             var executeActivityScopeProvider = new WindsorExecuteActivityScopeProvider<TActivity, TArguments>(kernel);
@@ -132,7 +239,7 @@ namespace MassTransit
 
         public static void ExecuteActivityHost<TActivity, TArguments>(this IReceiveEndpointConfigurator configurator, IWindsorContainer container,
             Action<IExecuteActivityConfigurator<TActivity, TArguments>> configure = null)
-            where TActivity : class, ExecuteActivity<TArguments>
+            where TActivity : class, IExecuteActivity<TArguments>
             where TArguments : class
         {
             RegisterScopedContextProviderIfNotPresent(container);
@@ -142,7 +249,7 @@ namespace MassTransit
 
         public static void CompensateActivityHost<TActivity, TLog>(this IReceiveEndpointConfigurator configurator, IKernel kernel,
             Action<ICompensateActivityConfigurator<TActivity, TLog>> configure = null)
-            where TActivity : class, CompensateActivity<TLog>
+            where TActivity : class, ICompensateActivity<TLog>
             where TLog : class
         {
             var compensateActivityScopeProvider = new WindsorCompensateActivityScopeProvider<TActivity, TLog>(kernel);
@@ -154,7 +261,7 @@ namespace MassTransit
 
         public static void CompensateActivityHost<TActivity, TLog>(this IReceiveEndpointConfigurator configurator, IWindsorContainer container,
             Action<ICompensateActivityConfigurator<TActivity, TLog>> configure = null)
-            where TActivity : class, CompensateActivity<TLog>
+            where TActivity : class, ICompensateActivity<TLog>
             where TLog : class
         {
             RegisterScopedContextProviderIfNotPresent(container);
@@ -162,12 +269,27 @@ namespace MassTransit
             CompensateActivityHost(configurator, container.Kernel, configure);
         }
 
-        static void RegisterScopedContextProviderIfNotPresent(IWindsorContainer container)
+        /// <summary>
+        /// Enables message scope lifetime for windsor containers
+        /// </summary>
+        /// <param name="configurator"></param>
+        public static void UseMessageScope(this IConsumePipeConfigurator configurator)
+        {
+            if (configurator == null)
+                throw new ArgumentNullException(nameof(configurator));
+
+            var specification = new WindsorMessageScopePipeSpecification();
+
+            configurator.AddPrePipeSpecification(specification);
+        }
+
+        internal static void RegisterScopedContextProviderIfNotPresent(this IWindsorContainer container)
         {
             if (!container.Kernel.HasComponent(typeof(ScopedConsumeContextProvider)))
             {
                 container.Register(Component.For<ScopedConsumeContextProvider>().LifestyleScoped(),
-                    Component.For<ConsumeContext>().UsingFactoryMethod(kernel => kernel.Resolve<ScopedConsumeContextProvider>().GetContext())
+                    Component.For<ConsumeContext>()
+                        .UsingFactoryMethod(kernel => kernel.Resolve<ScopedConsumeContextProvider>().GetContext())
                         .LifestyleScoped());
             }
         }

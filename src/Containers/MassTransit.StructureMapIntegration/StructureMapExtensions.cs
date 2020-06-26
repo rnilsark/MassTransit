@@ -1,77 +1,12 @@
-// Copyright 2007-2017 Chris Patterson, Dru Sellers, Travis Smith, et. al.
-//  
-// Licensed under the Apache License, Version 2.0 (the "License"); you may not use
-// this file except in compliance with the License. You may obtain a copy of the 
-// License at 
-// 
-//     http://www.apache.org/licenses/LICENSE-2.0 
-// 
-// Unless required by applicable law or agreed to in writing, software distributed
-// under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR 
-// CONDITIONS OF ANY KIND, either express or implied. See the License for the 
-// specific language governing permissions and limitations under the License.
 namespace MassTransit
 {
-    using System;
-    using System.Collections.Generic;
-    using System.Linq;
-    using Internals.Extensions;
-    using Registration;
     using Saga;
     using StructureMap;
     using StructureMapIntegration.Registration;
-    using StructureMapIntegration.ScopeProviders;
 
 
     public static class StructureMapExtensions
     {
-        /// <summary>
-        /// Specify that the service bus should load its subscribers from the container passed as an argument.
-        /// </summary>
-        /// <param name="configurator">The configurator the extension method works on.</param>
-        /// <param name="container">The StructureMap container.</param>
-        [Obsolete("LoadFrom is not recommended, review the documentation and use the Consumer methods for your container instead.")]
-        public static void LoadFrom(this IReceiveEndpointConfigurator configurator, IContainer container)
-        {
-            var scopeProvider = new StructureMapConsumerScopeProvider(container);
-
-            IList<Type> concreteTypes = FindTypes<IConsumer>(container, x => !x.HasInterface<ISaga>());
-            if (concreteTypes.Count > 0)
-                foreach (var concreteType in concreteTypes)
-                    ConsumerConfiguratorCache.Configure(concreteType, configurator, scopeProvider);
-
-            var sagaRepositoryFactory = new StructureMapSagaRepositoryFactory(container);
-
-            IList<Type> sagaTypes = FindTypes<ISaga>(container, x => true);
-            if (sagaTypes.Count > 0)
-                foreach (var sagaType in sagaTypes)
-                    SagaConfiguratorCache.Configure(sagaType, configurator, sagaRepositoryFactory);
-        }
-
-        /// <summary>
-        /// Specify that the service bus should load its subscribers from the container passed as an argument.
-        /// </summary>
-        /// <param name="configurator">The configurator the extension method works on.</param>
-        /// <param name="context"></param>
-        [Obsolete("LoadFrom is not recommended, review the documentation and use the Consumer methods for your container instead.")]
-        public static void LoadFrom(this IReceiveEndpointConfigurator configurator, IContext context)
-        {
-            var container = context.GetInstance<IContainer>();
-
-            configurator.LoadFrom(container);
-        }
-
-        /// <summary>
-        /// Registers the InMemory saga repository for all saga types (generic, can be overridden)
-        /// </summary>
-        /// <param name="registry"></param>
-        public static void RegisterInMemorySagaRepository(this ConfigurationExpression registry)
-        {
-            registry.For(typeof(ISagaRepository<>))
-                .Use(typeof(InMemorySagaRepository<>))
-                .Singleton();
-        }
-
         /// <summary>
         /// Register the InMemory saga repository for the specified saga type
         /// </summary>
@@ -80,22 +15,9 @@ namespace MassTransit
         public static void RegisterInMemorySagaRepository<T>(this ConfigurationExpression registry)
             where T : class, ISaga
         {
-            registry.For<ISagaRepository<T>>()
-                .Use<InMemorySagaRepository<T>>()
-                .Singleton();
-        }
+            var registrar = new StructureMapContainerRegistrar(registry);
 
-        static IList<Type> FindTypes<T>(IContainer container, Func<Type, bool> filter)
-        {
-            return container
-                .Model
-                .PluginTypes
-                .Where(x => x.PluginType.HasInterface<T>())
-                .Select(i => i.PluginType)
-                .Concat(container.Model.InstancesOf<T>().Select(x => x.ReturnedType))
-                .Where(filter)
-                .Distinct()
-                .ToList();
+            registrar.RegisterInMemorySagaRepository<T>();
         }
 
         internal static IContainer CreateNestedContainer(this IContainer container, ConsumeContext context)
@@ -104,6 +26,66 @@ namespace MassTransit
             nestedContainer.Configure(x =>
             {
                 x.For<ConsumeContext>()
+                    .Use(context);
+            });
+
+            return nestedContainer;
+        }
+
+        internal static IContainer CreateNestedContainer<T>(this IContainer container, SendContext<T> context)
+            where T : class
+        {
+            var nestedContainer = container.GetNestedContainer();
+            nestedContainer.Configure(x =>
+            {
+                x.For<SendContext<T>>()
+                    .Use(context);
+                x.For<SendContext>()
+                    .Use(context);
+            });
+
+            return nestedContainer;
+        }
+
+        internal static IContainer CreateNestedContainer<T>(this IContext container, SendContext<T> context)
+            where T : class
+        {
+            var nestedContainer = container.GetInstance<IContainer>().GetNestedContainer();
+            nestedContainer.Configure(x =>
+            {
+                x.For<SendContext<T>>()
+                    .Use(context);
+                x.For<SendContext>()
+                    .Use(context);
+            });
+
+            return nestedContainer;
+        }
+
+        internal static IContainer CreateNestedContainer<T>(this IContext container, PublishContext<T> context)
+            where T : class
+        {
+            var nestedContainer = container.GetInstance<IContainer>().GetNestedContainer();
+            nestedContainer.Configure(x =>
+            {
+                x.For<PublishContext<T>>()
+                    .Use(context);
+                x.For<PublishContext>()
+                    .Use(context);
+            });
+
+            return nestedContainer;
+        }
+
+        internal static IContainer CreateNestedContainer<T>(this IContainer container, PublishContext<T> context)
+            where T : class
+        {
+            var nestedContainer = container.GetNestedContainer();
+            nestedContainer.Configure(x =>
+            {
+                x.For<PublishContext<T>>()
+                    .Use(context);
+                x.For<PublishContext>()
                     .Use(context);
             });
 

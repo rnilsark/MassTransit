@@ -1,16 +1,4 @@
-﻿// Copyright 2007-2014 Chris Patterson
-//  
-// Licensed under the Apache License, Version 2.0 (the "License"); you may not use
-// this file except in compliance with the License. You may obtain a copy of the 
-// License at 
-// 
-//     http://www.apache.org/licenses/LICENSE-2.0 
-// 
-// Unless required by applicable law or agreed to in writing, software distributed
-// under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR 
-// CONDITIONS OF ANY KIND, either express or implied. See the License for the 
-// specific language governing permissions and limitations under the License.
-namespace MassTransit.Courier
+﻿namespace MassTransit.Courier
 {
     using System;
     using System.Collections.Generic;
@@ -18,14 +6,15 @@ namespace MassTransit.Courier
     using MassTransit.Serialization;
     using Newtonsoft.Json;
     using Newtonsoft.Json.Converters;
+    using Newtonsoft.Json.Linq;
 
 
     public static class SerializerCache
     {
-        static readonly Lazy<JsonSerializer> _deserializer = new Lazy<JsonSerializer>(CreateDeserializer,
-            LazyThreadSafetyMode.PublicationOnly);
+        static readonly Lazy<JsonSerializer> _deserializer = new Lazy<JsonSerializer>(CreateDeserializer, LazyThreadSafetyMode.PublicationOnly);
 
         static readonly Lazy<JsonSerializer> _serializer = new Lazy<JsonSerializer>(CreateSerializer, LazyThreadSafetyMode.PublicationOnly);
+        static JsonSerializerSettings _serializerSettings;
 
         public static JsonSerializer Serializer => _serializer.Value;
 
@@ -33,9 +22,9 @@ namespace MassTransit.Courier
 
         static JsonSerializer CreateSerializer()
         {
-            JsonSerializerSettings source = JsonMessageSerializer.SerializerSettings;
+            var source = JsonMessageSerializer.SerializerSettings;
 
-            var settings = new JsonSerializerSettings
+            _serializerSettings = new JsonSerializerSettings
             {
                 NullValueHandling = NullValueHandling.Include,
                 DefaultValueHandling = DefaultValueHandling.Include,
@@ -47,14 +36,14 @@ namespace MassTransit.Courier
                 Converters = new List<JsonConverter>(source.Converters)
             };
 
-            settings.Converters.Add(new StringEnumConverter());
+            _serializerSettings.Converters.Add(new StringEnumConverter());
 
-            return JsonSerializer.Create(settings);
+            return JsonSerializer.Create(_serializerSettings);
         }
 
         static JsonSerializer CreateDeserializer()
         {
-            JsonSerializerSettings source = JsonMessageSerializer.DeserializerSettings;
+            var source = JsonMessageSerializer.DeserializerSettings;
 
             var settings = new JsonSerializerSettings
             {
@@ -71,6 +60,26 @@ namespace MassTransit.Courier
             settings.Converters.Add(new StringEnumConverter());
 
             return JsonSerializer.Create(settings);
+        }
+
+        public static IDictionary<string, object> GetObjectAsDictionary(object values)
+        {
+            if (values == null)
+                return new Dictionary<string, object>();
+
+            var dictionary = JObject.FromObject(values, Serializer);
+
+            return dictionary.ToObject<IDictionary<string, object>>();
+        }
+
+        public static string ConvertDictionaryToString(IDictionary<string, object> dictionary)
+        {
+            return JsonConvert.SerializeObject(dictionary, Formatting.None, _serializerSettings);
+        }
+
+        public static IDictionary<string, object> ConvertStringToDictionary(string json)
+        {
+            return JObject.Parse(json).ToObject<IDictionary<string, object>>();
         }
     }
 }

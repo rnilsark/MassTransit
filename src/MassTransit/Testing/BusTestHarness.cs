@@ -1,22 +1,10 @@
-﻿// Copyright 2007-2016 Chris Patterson, Dru Sellers, Travis Smith, et. al.
-//  
-// Licensed under the Apache License, Version 2.0 (the "License"); you may not use
-// this file except in compliance with the License. You may obtain a copy of the 
-// License at 
-// 
-//     http://www.apache.org/licenses/LICENSE-2.0 
-// 
-// Unless required by applicable law or agreed to in writing, software distributed
-// under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR 
-// CONDITIONS OF ANY KIND, either express or implied. See the License for the 
-// specific language governing permissions and limitations under the License.
-namespace MassTransit.Testing
+﻿namespace MassTransit.Testing
 {
     using System;
     using System.Threading;
     using System.Threading.Tasks;
+    using Context;
     using GreenPipes;
-    using Logging;
     using Observers;
     using Util;
 
@@ -27,26 +15,26 @@ namespace MassTransit.Testing
     public abstract class BusTestHarness :
         AsyncTestHarness
     {
-        static readonly ILog _log = Logger.Get<BusTestHarness>();
-
-        IBusControl _bus;
         ConnectHandle _busConsumeObserver;
         BusHandle _busHandle;
         ConnectHandle _busPublishObserver;
+        ConnectHandle _busReceiveObserver;
         ConnectHandle _busSendObserver;
         BusTestConsumeObserver _consumed;
         ConnectHandle _inputQueueSendObserver;
         BusTestPublishObserver _published;
+        BusTestReceiveObserver _received;
         ConnectHandle _receiveEndpointObserver;
-        TestSendObserver _sent;
+        ConnectHandle _receiveInactivityHandle;
+        BusTestSendObserver _sent;
 
-        public IBus Bus => _bus;
-        public IBusControl BusControl => _bus;
+        public IBus Bus => BusControl;
+        public IBusControl BusControl { get; set; }
 
         /// <summary>
         /// The address of the default bus endpoint, used as the SourceAddress for requests and published messages
         /// </summary>
-        public Uri BusAddress => _bus.Address;
+        public Uri BusAddress => BusControl.Address;
 
         /// <summary>
         /// The name of the input queue (for the default receive endpoint)
@@ -74,24 +62,10 @@ namespace MassTransit.Testing
 
         protected abstract IBusControl CreateBus();
 
-        public virtual IRequestClient<TRequest, TResponse> CreateRequestClient<TRequest, TResponse>()
-            where TRequest : class
-            where TResponse : class
-        {
-            return CreateRequestClient<TRequest, TResponse>(InputQueueAddress);
-        }
-
         public virtual IRequestClient<TRequest> CreateRequestClient<TRequest>()
             where TRequest : class
         {
             return CreateRequestClient<TRequest>(InputQueueAddress);
-        }
-
-        public virtual IRequestClient<TRequest, TResponse> CreateRequestClient<TRequest, TResponse>(Uri destinationAddress)
-            where TRequest : class
-            where TResponse : class
-        {
-            return Bus.CreateRequestClient<TRequest, TResponse>(destinationAddress, TestTimeout);
         }
 
         public virtual IRequestClient<TRequest> CreateRequestClient<TRequest>(Uri destinationAddress)
@@ -122,31 +96,33 @@ namespace MassTransit.Testing
         public event Action<IBusFactoryConfigurator> OnConfigureBus;
         public event Action<IBus> OnConnectObservers;
 
-        public virtual async Task Start()
+        public virtual async Task Start(CancellationToken cancellationToken = default)
         {
-            _sent = new TestSendObserver(TestTimeout);
-            _consumed = new BusTestConsumeObserver(TestTimeout);
-            _published = new BusTestPublishObserver(TestTimeout);
+            _received = new BusTestReceiveObserver(TestInactivityTimeout);
+            _receiveInactivityHandle = _received.ConnectInactivityObserver(InactivityObserver);
+
+            _consumed = new BusTestConsumeObserver(TestTimeout, InactivityToken);
+            _published = new BusTestPublishObserver(TestTimeout, InactivityToken);
+            _sent = new BusTestSendObserver(TestTimeout, InactivityToken);
 
             PreCreateBus?.Invoke(this);
 
-            _bus = CreateBus();
+            BusControl = CreateBus();
 
-            ConnectObservers(_bus);
+            ConnectObservers(BusControl);
 
-            _busHandle = await _bus.StartAsync().ConfigureAwait(false);
+            _busHandle = await BusControl.StartAsync(cancellationToken).ConfigureAwait(false);
 
-            BusSendEndpoint = await GetSendEndpoint(_bus.Address).ConfigureAwait(false);
+            BusSendEndpoint = await GetSendEndpoint(BusControl.Address).ConfigureAwait(false);
 
             InputQueueSendEndpoint = await GetSendEndpoint(InputQueueAddress).ConfigureAwait(false);
 
             _inputQueueSendObserver = InputQueueSendEndpoint.ConnectSendObserver(_sent);
 
-            _busConsumeObserver = _bus.ConnectConsumeObserver(_consumed);
-
-            _busPublishObserver = _bus.ConnectPublishObserver(_published);
-
-            _busSendObserver = _bus.ConnectSendObserver(_sent);
+            _busConsumeObserver = BusControl.ConnectConsumeObserver(_consumed);
+            _busPublishObserver = BusControl.ConnectPublishObserver(_published);
+            _busReceiveObserver = BusControl.ConnectReceiveObserver(_received);
+            _busSendObserver = BusControl.ConnectSendObserver(_sent);
         }
 
         public virtual async Task Stop()
@@ -168,26 +144,31 @@ namespace MassTransit.Testing
                 _busConsumeObserver?.Disconnect();
                 _busConsumeObserver = null;
 
-                using (var tokenSource = new CancellationTokenSource(TestTimeout))
+                _busReceiveObserver?.Disconnect();
+                _receiveInactivityHandle?.Disconnect();
+
+                if (_busHandle != null)
                 {
-                    await (_busHandle?.StopAsync(tokenSource.Token) ?? TaskUtil.Completed).ConfigureAwait(false);
+                    using var tokenSource = new CancellationTokenSource(TestTimeout);
+
+                    await _busHandle.StopAsync(tokenSource.Token).ConfigureAwait(false);
                 }
             }
             catch (Exception ex)
             {
-                _log.Error("Bus Stop Failed: ", ex);
+                LogContext.Error?.Log(ex, "Stop bus faulted");
                 throw;
             }
             finally
             {
                 _busHandle = null;
-                _bus = null;
+                BusControl = null;
             }
         }
 
         public async Task<ISendEndpoint> GetSendEndpoint(Uri address)
         {
-            return await _bus.GetSendEndpoint(address).ConfigureAwait(false);
+            return await BusControl.GetSendEndpoint(address).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -199,7 +180,7 @@ namespace MassTransit.Testing
         public Task<ConsumeContext<T>> SubscribeHandler<T>()
             where T : class
         {
-            var source = new TaskCompletionSource<ConsumeContext<T>>();
+            TaskCompletionSource<ConsumeContext<T>> source = TaskUtil.GetTask<ConsumeContext<T>>();
 
             ConnectHandle handler = null;
             handler = Bus.ConnectHandler<T>(async context =>
@@ -229,7 +210,7 @@ namespace MassTransit.Testing
         public Task<ConsumeContext<T>> SubscribeHandler<T>(Func<ConsumeContext<T>, bool> filter)
             where T : class
         {
-            var source = new TaskCompletionSource<ConsumeContext<T>>();
+            TaskCompletionSource<ConsumeContext<T>> source = TaskUtil.GetTask<ConsumeContext<T>>();
 
             ConnectHandle handler = null;
             handler = Bus.ConnectHandler<T>(async context =>
@@ -307,7 +288,7 @@ namespace MassTransit.Testing
             var count = 0;
             configurator.Handler<T>(async context =>
             {
-                int value = Interlocked.Increment(ref count);
+                var value = Interlocked.Increment(ref count);
                 if (value == expectedCount)
                     source.TrySetResult(context);
             });
@@ -316,7 +297,7 @@ namespace MassTransit.Testing
         }
 
         /// <summary>
-        /// Registers a handler on the receive endpoint that is completed after the specified handler is 
+        /// Registers a handler on the receive endpoint that is completed after the specified handler is
         /// executed and canceled if the test is canceled.
         /// </summary>
         /// <typeparam name="T"></typeparam>
@@ -372,14 +353,6 @@ namespace MassTransit.Testing
 
                 return TaskUtil.Completed;
             }
-        }
-
-
-        public void LogEndpoint(IReceiveEndpointConfigurator configurator)
-        {
-            configurator.UseLog(Console.Out, log =>
-                Task.FromResult(
-                    $"Received (input_queue): {log.Context.ReceiveContext.TransportHeaders.Get("MessageId", "N/A")}, Types = ({string.Join(",", log.Context.SupportedMessageTypes)})"));
         }
     }
 }

@@ -1,19 +1,11 @@
-// Copyright 2007-2016 Chris Patterson, Dru Sellers, Travis Smith, et. al.
-//  
-// Licensed under the Apache License, Version 2.0 (the "License"); you may not use
-// this file except in compliance with the License. You may obtain a copy of the 
-// License at 
-// 
-//     http://www.apache.org/licenses/LICENSE-2.0 
-// 
-// Unless required by applicable law or agreed to in writing, software distributed
-// under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR 
-// CONDITIONS OF ANY KIND, either express or implied. See the License for the 
-// specific language governing permissions and limitations under the License.
 namespace MassTransit.TestFramework
 {
     using System;
+    using System.Diagnostics;
+    using System.Threading;
     using System.Threading.Tasks;
+    using Context;
+    using Logging;
     using Testing;
 
 
@@ -23,16 +15,39 @@ namespace MassTransit.TestFramework
     public abstract class BusTestFixture :
         AsyncTestFixture
     {
+        static int _subscribedObserver;
+        static readonly bool _enableDiagnostics = !bool.TryParse(Environment.GetEnvironmentVariable("CI"), out var isBuildServer) || !isBuildServer;
+        protected static readonly TestOutputLoggerFactory LoggerFactory;
+
+        static BusTestFixture()
+        {
+            LoggerFactory = new TestOutputLoggerFactory(true);
+        }
+
         protected BusTestFixture(BusTestHarness harness)
             : base(harness)
         {
             BusTestHarness = harness;
+
+            harness.OnConnectObservers += ConnectObservers;
+            harness.OnConfigureBus += ConfigureBusDiagnostics;
         }
 
         protected BusTestHarness BusTestHarness { get; }
 
         protected IBus Bus => BusTestHarness.Bus;
         protected IBusControl BusControl => BusTestHarness.BusControl;
+
+        public static void ConfigureBusDiagnostics(IBusFactoryConfigurator configurator)
+        {
+            LogContext.ConfigureCurrentLogContext(LoggerFactory);
+
+            if (_enableDiagnostics)
+            {
+                if (Interlocked.CompareExchange(ref _subscribedObserver, 1, 0) == 0)
+                    DiagnosticListener.AllListeners.Subscribe(new DiagnosticListenerObserver());
+            }
+        }
 
         /// <summary>
         /// Subscribes a message handler to the bus, which is disconnected after the message
@@ -57,6 +72,30 @@ namespace MassTransit.TestFramework
             where T : class
         {
             return BusTestHarness.SubscribeHandler(filter);
+        }
+
+        protected Task<ConsumeContext<T>> ConnectPublishHandler<T>()
+            where T : class
+        {
+            Task<ConsumeContext<T>> result = null;
+            Bus.ConnectReceiveEndpoint(NewId.NextGuid().ToString(), context =>
+            {
+                result = Handled<T>(context);
+            });
+
+            return result;
+        }
+
+        protected Task<ConsumeContext<T>> ConnectPublishHandler<T>(Func<ConsumeContext<T>, bool> filter)
+            where T : class
+        {
+            Task<ConsumeContext<T>> result = null;
+            Bus.ConnectReceiveEndpoint(NewId.NextGuid().ToString(), context =>
+            {
+                result = Handled(context, filter);
+            });
+
+            return result;
         }
 
         /// <summary>
@@ -114,7 +153,7 @@ namespace MassTransit.TestFramework
         }
 
         /// <summary>
-        /// Registers a handler on the receive endpoint that is completed after the specified handler is 
+        /// Registers a handler on the receive endpoint that is completed after the specified handler is
         /// executed and canceled if the test is canceled.
         /// </summary>
         /// <typeparam name="T"></typeparam>
@@ -129,11 +168,6 @@ namespace MassTransit.TestFramework
 
         protected virtual void ConnectObservers(IBus bus)
         {
-        }
-
-        protected void LogEndpoint(IReceiveEndpointConfigurator configurator)
-        {
-            BusTestHarness.LogEndpoint(configurator);
         }
     }
 }

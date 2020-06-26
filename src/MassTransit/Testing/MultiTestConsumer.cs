@@ -1,19 +1,8 @@
-﻿// Copyright 2007-2016 Chris Patterson, Dru Sellers, Travis Smith, et. al.
-//  
-// Licensed under the Apache License, Version 2.0 (the "License"); you may not use
-// this file except in compliance with the License. You may obtain a copy of the 
-// License at 
-// 
-//     http://www.apache.org/licenses/LICENSE-2.0 
-// 
-// Unless required by applicable law or agreed to in writing, software distributed
-// under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR 
-// CONDITIONS OF ANY KIND, either express or implied. See the License for the 
-// specific language governing permissions and limitations under the License.
-namespace MassTransit.Testing
+﻿namespace MassTransit.Testing
 {
     using System;
     using System.Collections.Generic;
+    using System.Threading;
     using System.Threading.Tasks;
     using GreenPipes;
     using MessageObservers;
@@ -25,13 +14,15 @@ namespace MassTransit.Testing
     {
         readonly IList<IConsumerConfigurator> _configures;
         readonly ReceivedMessageList _received;
+        readonly CancellationToken _testCompleted;
 
-        public MultiTestConsumer(TimeSpan timeout)
+        public MultiTestConsumer(TimeSpan timeout, CancellationToken testCompleted = default)
         {
+            _testCompleted = testCompleted;
             Timeout = timeout;
             _configures = new List<IConsumerConfigurator>();
 
-            _received = new ReceivedMessageList(timeout);
+            _received = new ReceivedMessageList(timeout, testCompleted);
         }
 
         public IReceivedMessageList Received => _received;
@@ -121,19 +112,18 @@ namespace MassTransit.Testing
             where T : class
         {
             readonly MultiTestConsumer _multiConsumer;
-            readonly ReceivedMessageList<T> _received;
 
             public Of(MultiTestConsumer multiConsumer)
             {
                 _multiConsumer = multiConsumer;
-                _received = new ReceivedMessageList<T>(multiConsumer.Timeout);
+                Received = new ReceivedMessageList<T>(multiConsumer.Timeout, multiConsumer._testCompleted);
             }
 
-            public ReceivedMessageList<T> Received => _received;
+            public ReceivedMessageList<T> Received { get; }
 
             public Task Consume(ConsumeContext<T> context)
             {
-                _received.Add(context);
+                Received.Add(context);
                 _multiConsumer._received.Add(context);
 
                 return TaskUtil.Completed;
@@ -146,19 +136,18 @@ namespace MassTransit.Testing
             where T : class
         {
             readonly MultiTestConsumer _multiConsumer;
-            readonly ReceivedMessageList<T> _received;
 
             public FaultOf(MultiTestConsumer multiConsumer)
             {
                 _multiConsumer = multiConsumer;
-                _received = new ReceivedMessageList<T>(multiConsumer.Timeout);
+                Received = new ReceivedMessageList<T>(multiConsumer.Timeout, multiConsumer._testCompleted);
             }
 
-            public ReceivedMessageList<T> Received => _received;
+            public ReceivedMessageList<T> Received { get; }
 
             public Task Consume(ConsumeContext<T> context)
             {
-                _received.Add(context);
+                Received.Add(context);
                 _multiConsumer._received.Add(context);
 
                 throw new InvalidOperationException("This is intentional from a test");

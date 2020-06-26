@@ -1,49 +1,16 @@
-// Copyright 2007-2016 Chris Patterson, Dru Sellers, Travis Smith, et. al.
-//  
-// Licensed under the Apache License, Version 2.0 (the "License"); you may not use
-// this file except in compliance with the License. You may obtain a copy of the 
-// License at 
-// 
-//     http://www.apache.org/licenses/LICENSE-2.0 
-// 
-// Unless required by applicable law or agreed to in writing, software distributed
-// under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR 
-// CONDITIONS OF ANY KIND, either express or implied. See the License for the 
-// specific language governing permissions and limitations under the License.
 namespace MassTransit.TestFramework
 {
     using System;
     using System.Threading.Tasks;
     using NUnit.Framework;
     using Testing;
-    using Transports.InMemory;
     using Util;
 
 
     public class InMemoryTestFixture :
         BusTestFixture
     {
-        [SetUp]
-        public Task SetupInMemoryTest()
-        {
-            return _busCreationScope.TestSetup();
-        }
-
-        [TearDown]
-        public Task TearDownInMemoryTest()
-        {
-            return _busCreationScope.TestTeardown();
-        }
-
-        protected InMemoryTestHarness InMemoryTestHarness { get; }
-
         readonly IBusCreationScope _busCreationScope;
-
-        protected string InputQueueName => InMemoryTestHarness.InputQueueName;
-
-        protected Uri BaseAddress => InMemoryTestHarness.BaseAddress;
-
-        protected IInMemoryHost Host => InMemoryTestHarness.Host;
 
         public InMemoryTestFixture(bool busPerTest = false)
             : this(new InMemoryTestHarness(), busPerTest)
@@ -60,10 +27,15 @@ namespace MassTransit.TestFramework
             else
                 _busCreationScope = new PerTestFixtureBusCreationScope(SetupBus, TeardownBus);
 
-            InMemoryTestHarness.OnConnectObservers += ConnectObservers;
             InMemoryTestHarness.OnConfigureInMemoryBus += ConfigureInMemoryBus;
             InMemoryTestHarness.OnConfigureInMemoryReceiveEndpoint += ConfigureInMemoryReceiveEndpoint;
         }
+
+        protected InMemoryTestHarness InMemoryTestHarness { get; }
+
+        protected string InputQueueName => InMemoryTestHarness.InputQueueName;
+
+        protected Uri BaseAddress => InMemoryTestHarness.BaseAddress;
 
         /// <summary>
         /// The sending endpoint for the InputQueue
@@ -71,7 +43,7 @@ namespace MassTransit.TestFramework
         protected ISendEndpoint InputQueueSendEndpoint => InMemoryTestHarness.InputQueueSendEndpoint;
 
         /// <summary>
-        /// The sending endpoint for the Bus 
+        /// The sending endpoint for the Bus
         /// </summary>
         protected ISendEndpoint BusSendEndpoint => InMemoryTestHarness.BusSendEndpoint;
 
@@ -79,17 +51,34 @@ namespace MassTransit.TestFramework
 
         protected Uri InputQueueAddress => InMemoryTestHarness.InputQueueAddress;
 
-        protected IRequestClient<TRequest, TResponse> CreateRequestClient<TRequest, TResponse>()
-            where TRequest : class
-            where TResponse : class
+        [SetUp]
+        public Task SetupInMemoryTest()
         {
-            return InMemoryTestHarness.CreateRequestClient<TRequest, TResponse>();
+            return _busCreationScope.TestSetup();
+        }
+
+        [TearDown]
+        public Task TearDownInMemoryTest()
+        {
+            return _busCreationScope.TestTeardown();
         }
 
         protected IRequestClient<TRequest> CreateRequestClient<TRequest>()
             where TRequest : class
         {
             return InMemoryTestHarness.CreateRequestClient<TRequest>();
+        }
+
+        protected IRequestClient<TRequest> CreateRequestClient<TRequest>(Uri destinationAddress)
+            where TRequest : class
+        {
+            return InMemoryTestHarness.CreateRequestClient<TRequest>(destinationAddress);
+        }
+
+        protected Task<IRequestClient<TRequest>> ConnectRequestClient<TRequest>()
+            where TRequest : class
+        {
+            return InMemoryTestHarness.ConnectRequestClient<TRequest>();
         }
 
         [OneTimeSetUp]
@@ -127,30 +116,6 @@ namespace MassTransit.TestFramework
 
         protected virtual void ConfigureInMemoryReceiveEndpoint(IInMemoryReceiveEndpointConfigurator configurator)
         {
-        }
-
-        protected Task<ConsumeContext<T>> ConnectPublishHandler<T>()
-            where T : class
-        {
-            Task<ConsumeContext<T>> result = null;
-            Host.ConnectReceiveEndpoint(NewId.NextGuid().ToString(), context =>
-            {
-                result = Handled<T>(context);
-            });
-
-            return result;
-        }
-
-        protected Task<ConsumeContext<T>> ConnectPublishHandler<T>(Func<ConsumeContext<T>, bool> filter)
-            where T : class
-        {
-            Task<ConsumeContext<T>> result = null;
-            Host.ConnectReceiveEndpoint(NewId.NextGuid().ToString(), context =>
-            {
-                result = Handled<T>(context, filter);
-            });
-
-            return result;
         }
 
 

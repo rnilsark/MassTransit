@@ -1,21 +1,9 @@
-﻿// Copyright 2007-2018 Chris Patterson, Dru Sellers, Travis Smith, et. al.
-//
-// Licensed under the Apache License, Version 2.0 (the "License"); you may not use
-// this file except in compliance with the License. You may obtain a copy of the
-// License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software distributed
-// under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
-// CONDITIONS OF ANY KIND, either express or implied. See the License for the
-// specific language governing permissions and limitations under the License.
-namespace MassTransit.Initializers.Factories
+﻿namespace MassTransit.Initializers.Factories
 {
     using System;
     using System.Collections.Generic;
     using System.Threading.Tasks;
-    using Util;
+    using Metadata;
 
 
     public class MessageInitializerBuilder<TMessage, TInput> :
@@ -23,25 +11,21 @@ namespace MassTransit.Initializers.Factories
         where TMessage : class
         where TInput : class
     {
-        readonly IDictionary<string, IPropertyInitializer<TMessage, TInput>> _initializers;
         readonly IList<IHeaderInitializer<TMessage, TInput>> _headerInitializers;
+        readonly IDictionary<string, IPropertyInitializer<TMessage, TInput>> _initializers;
         readonly HashSet<string> _inputPropertyUsed;
+        readonly IMessageFactory<TMessage> _messageFactory;
 
-        public MessageInitializerBuilder()
+        public MessageInitializerBuilder(IMessageFactory<TMessage> messageFactory)
         {
             if (!TypeMetadataCache<TMessage>.IsValidMessageType)
                 throw new ArgumentException(TypeMetadataCache<TMessage>.InvalidMessageTypeReason, nameof(TMessage));
 
+            _messageFactory = messageFactory;
+
             _initializers = new Dictionary<string, IPropertyInitializer<TMessage, TInput>>(StringComparer.OrdinalIgnoreCase);
             _headerInitializers = new List<IHeaderInitializer<TMessage, TInput>>();
             _inputPropertyUsed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        }
-
-        public IMessageInitializer<TMessage> Build()
-        {
-            IMessageFactory<TMessage> messageFactory = MessageFactoryCache<TMessage>.Factory;
-
-            return new MessageInitializer<TMessage, TInput>(messageFactory, _initializers.Values, _headerInitializers);
         }
 
         public void Add(string propertyName, IPropertyInitializer<TMessage> initializer)
@@ -72,6 +56,13 @@ namespace MassTransit.Initializers.Factories
         public void SetInputPropertyUsed(string propertyName)
         {
             _inputPropertyUsed.Add(propertyName);
+        }
+
+        public IMessageInitializer<TMessage> Build()
+        {
+            IMessageFactory<TMessage> messageFactory = _messageFactory ?? MessageFactoryCache<TMessage>.Factory;
+
+            return new MessageInitializer<TMessage, TInput>(messageFactory, _initializers.Values, _headerInitializers);
         }
 
 

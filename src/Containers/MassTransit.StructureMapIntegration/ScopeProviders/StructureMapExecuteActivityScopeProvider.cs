@@ -1,7 +1,7 @@
 namespace MassTransit.StructureMapIntegration.ScopeProviders
 {
+    using System;
     using Courier;
-    using Courier.Hosts;
     using GreenPipes;
     using Scoping;
     using Scoping.CourierContexts;
@@ -10,19 +10,16 @@ namespace MassTransit.StructureMapIntegration.ScopeProviders
 
     public class StructureMapExecuteActivityScopeProvider<TActivity, TArguments> :
         IExecuteActivityScopeProvider<TActivity, TArguments>
-        where TActivity : class, ExecuteActivity<TArguments>
+        where TActivity : class, IExecuteActivity<TArguments>
         where TArguments : class
     {
         readonly IContainer _container;
-        readonly IContext _context;
-
-        public StructureMapExecuteActivityScopeProvider(IContext context)
-        {
-            _context = context;
-        }
 
         public StructureMapExecuteActivityScopeProvider(IContainer container)
         {
+            if (container == null)
+                throw new ArgumentNullException(nameof(container));
+
             _container = container;
         }
 
@@ -30,25 +27,25 @@ namespace MassTransit.StructureMapIntegration.ScopeProviders
         {
             if (context.TryGetPayload<IContainer>(out var existingContainer))
             {
-                existingContainer.Inject(context.ConsumeContext);
+                existingContainer.Inject<ConsumeContext>(context);
 
                 var activity = existingContainer
                     .With(context.Arguments)
                     .GetInstance<TActivity>();
 
-                ExecuteActivityContext<TActivity, TArguments> activityContext = new HostExecuteActivityContext<TActivity, TArguments>(activity, context);
+                ExecuteActivityContext<TActivity, TArguments> activityContext = context.CreateActivityContext(activity);
 
                 return new ExistingExecuteActivityScopeContext<TActivity, TArguments>(activityContext);
             }
 
-            var nestedContainer = _container?.CreateNestedContainer(context.ConsumeContext) ?? _context?.CreateNestedContainer(context.ConsumeContext);
+            var nestedContainer = _container.CreateNestedContainer(context);
             try
             {
                 var activity = nestedContainer
                     .With(context.Arguments)
                     .GetInstance<TActivity>();
 
-                ExecuteActivityContext<TActivity, TArguments> activityContext = new HostExecuteActivityContext<TActivity, TArguments>(activity, context);
+                ExecuteActivityContext<TActivity, TArguments> activityContext = context.CreateActivityContext(activity);
                 activityContext.UpdatePayload(nestedContainer);
 
                 return new CreatedExecuteActivityScopeContext<IContainer, TActivity, TArguments>(nestedContainer, activityContext);

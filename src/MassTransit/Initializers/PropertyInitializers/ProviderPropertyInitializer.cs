@@ -1,9 +1,10 @@
 namespace MassTransit.Initializers.PropertyInitializers
 {
     using System;
+    using System.Reflection;
     using System.Threading.Tasks;
     using Internals.Reflection;
-    using PropertyProviders;
+    using Util;
 
 
     /// <summary>
@@ -17,27 +18,41 @@ namespace MassTransit.Initializers.PropertyInitializers
         where TMessage : class
         where TInput : class
     {
-        readonly IPropertyProvider<TInput, TProperty> _propertyProvider;
         readonly IWriteProperty<TMessage, TProperty> _messageProperty;
+        readonly IPropertyProvider<TInput, TProperty> _propertyProvider;
 
-        public ProviderPropertyInitializer(IPropertyProvider<TInput, TProperty> propertyProvider, string propertyName)
+        public ProviderPropertyInitializer(IPropertyProvider<TInput, TProperty> propertyProvider, PropertyInfo propertyInfo)
         {
             if (propertyProvider == null)
                 throw new ArgumentNullException(nameof(propertyProvider));
 
-            if (propertyName == null)
-                throw new ArgumentNullException(nameof(propertyName));
+            if (propertyInfo == null)
+                throw new ArgumentNullException(nameof(propertyInfo));
 
             _propertyProvider = propertyProvider;
 
-            _messageProperty = WritePropertyCache<TMessage>.GetProperty<TProperty>(propertyName);
+            _messageProperty = WritePropertyCache<TMessage>.GetProperty<TProperty>(propertyInfo);
         }
 
-        public async Task Apply(InitializeContext<TMessage, TInput> context)
+        public Task Apply(InitializeContext<TMessage, TInput> context)
         {
-            var propertyValue = await _propertyProvider.GetProperty(context).ConfigureAwait(false);
+            Task<TProperty> propertyTask = _propertyProvider.GetProperty(context);
+            if (propertyTask.IsCompleted)
+            {
+                if (_messageProperty.TargetType == context.MessageType)
+                    _messageProperty.Set(context.Message, propertyTask.Result);
+                return TaskUtil.Completed;
+            }
 
-            _messageProperty.Set(context.Message, propertyValue);
+            async Task ApplyAsync()
+            {
+                var propertyValue = await propertyTask.ConfigureAwait(false);
+
+                if (_messageProperty.TargetType == context.MessageType)
+                    _messageProperty.Set(context.Message, propertyValue);
+            }
+
+            return ApplyAsync();
         }
     }
 }

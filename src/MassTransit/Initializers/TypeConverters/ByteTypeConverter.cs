@@ -6,6 +6,7 @@
     public class ByteTypeConverter :
         ITypeConverter<string, byte>,
         ITypeConverter<byte, string>,
+        ITypeConverter<byte, object>,
         ITypeConverter<byte, sbyte>,
         ITypeConverter<byte, short>,
         ITypeConverter<byte, ushort>,
@@ -14,9 +15,28 @@
         ITypeConverter<byte, long>,
         ITypeConverter<byte, ulong>
     {
-        public bool TryConvert(string input, out byte result)
+        public bool TryConvert(int input, out byte result)
         {
-            return byte.TryParse(input, out result);
+            result = Convert.ToByte(input);
+            return true;
+        }
+
+        public bool TryConvert(long input, out byte result)
+        {
+            result = Convert.ToByte(input);
+            return true;
+        }
+
+        public bool TryConvert(object input, out byte result)
+        {
+            if (input != null)
+            {
+                result = Convert.ToByte(input);
+                return true;
+            }
+
+            result = default;
+            return false;
         }
 
         public bool TryConvert(sbyte input, out byte result)
@@ -31,16 +51,9 @@
             return true;
         }
 
-        public bool TryConvert(ushort input, out byte result)
+        public bool TryConvert(string input, out byte result)
         {
-            result = Convert.ToByte(input);
-            return true;
-        }
-
-        public bool TryConvert(int input, out byte result)
-        {
-            result = Convert.ToByte(input);
-            return true;
+            return byte.TryParse(input, out result);
         }
 
         public bool TryConvert(uint input, out byte result)
@@ -49,13 +62,13 @@
             return true;
         }
 
-        public bool TryConvert(long input, out byte result)
+        public bool TryConvert(ulong input, out byte result)
         {
             result = Convert.ToByte(input);
             return true;
         }
 
-        public bool TryConvert(ulong input, out byte result)
+        public bool TryConvert(ushort input, out byte result)
         {
             result = Convert.ToByte(input);
             return true;

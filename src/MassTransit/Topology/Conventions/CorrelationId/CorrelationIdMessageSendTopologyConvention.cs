@@ -1,16 +1,4 @@
-﻿// Copyright 2007-2017 Chris Patterson, Dru Sellers, Travis Smith, et. al.
-//  
-// Licensed under the Apache License, Version 2.0 (the "License"); you may not use
-// this file except in compliance with the License. You may obtain a copy of the 
-// License at 
-// 
-//     http://www.apache.org/licenses/LICENSE-2.0 
-// 
-// Unless required by applicable law or agreed to in writing, software distributed
-// under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR 
-// CONDITIONS OF ANY KIND, either express or implied. See the License for the 
-// specific language governing permissions and limitations under the License.
-namespace MassTransit.Topology.Conventions.CorrelationId
+﻿namespace MassTransit.Topology.Conventions.CorrelationId
 {
     using System.Collections.Generic;
     using Context;
@@ -42,22 +30,31 @@ namespace MassTransit.Topology.Conventions.CorrelationId
 
         bool IMessageSendTopologyConvention<TMessage>.TryGetMessageSendTopology(out IMessageSendTopology<TMessage> messageSendTopology)
         {
-            foreach (ICorrelationIdSelector<TMessage> selector in _selectors)
+            if (TryGetMessageCorrelationId(out IMessageCorrelationId<TMessage> messageCorrelationId))
             {
-                if (selector.TryGetSetCorrelationId(out ISetCorrelationId<TMessage> setCorrelationId))
-                {
-                    messageSendTopology = new SetCorrelationIdMessageSendTopology<TMessage>(setCorrelationId);
-                    return true;
-                }
+                messageSendTopology = new SetCorrelationIdMessageSendTopology<TMessage>(messageCorrelationId);
+                return true;
             }
 
             messageSendTopology = null;
             return false;
         }
 
-        public void SetCorrelationId(ISetCorrelationId<TMessage> setCorrelationId)
+        public void SetCorrelationId(IMessageCorrelationId<TMessage> messageCorrelationId)
         {
-            _selectors.Insert(0, new SetCorrelationIdSelector<TMessage>(setCorrelationId));
+            _selectors.Insert(0, new SetCorrelationIdSelector<TMessage>(messageCorrelationId));
+        }
+
+        public bool TryGetMessageCorrelationId(out IMessageCorrelationId<TMessage> messageCorrelationId)
+        {
+            foreach (ICorrelationIdSelector<TMessage> selector in _selectors)
+            {
+                if (selector.TryGetSetCorrelationId(out messageCorrelationId))
+                    return true;
+            }
+
+            messageCorrelationId = null;
+            return false;
         }
     }
 }

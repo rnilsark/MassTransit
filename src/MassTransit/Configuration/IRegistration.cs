@@ -1,20 +1,8 @@
-// Copyright 2007-2019 Chris Patterson, Dru Sellers, Travis Smith, et. al.
-//
-// Licensed under the Apache License, Version 2.0 (the "License"); you may not use
-// this file except in compliance with the License. You may obtain a copy of the
-// License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software distributed
-// under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
-// CONDITIONS OF ANY KIND, either express or implied. See the License for the
-// specific language governing permissions and limitations under the License.
 namespace MassTransit
 {
     using System;
     using ConsumeConfigurators;
-    using Definition;
+    using Registration;
     using Saga;
 
 
@@ -22,7 +10,8 @@ namespace MassTransit
     /// Registration contains the consumers and sagas that have been registered, allowing them to be configured on one or more
     /// receive endpoints.
     /// </summary>
-    public interface IRegistration
+    public interface IRegistration :
+        IConfigurationServiceProvider
     {
         /// <summary>
         /// Configure a consumer on the receive endpoint
@@ -76,7 +65,7 @@ namespace MassTransit
         void ConfigureExecuteActivity(Type activityType, IReceiveEndpointConfigurator configurator);
 
         /// <summary>
-        /// Configure the specified  activity type
+        /// Configure the specified activity type
         /// </summary>
         /// <param name="activityType"></param>
         /// <param name="executeEndpointConfigurator">The configurator for the execute activity endpoint</param>
@@ -85,15 +74,18 @@ namespace MassTransit
             IReceiveEndpointConfigurator compensateEndpointConfigurator);
 
         /// <summary>
-        /// Configure the endpoints for all defined consumer, saga, and activity types using an optional
-        /// endpoint name formatter. If no endpoint name formatter is specified and an <see cref="IEndpointNameFormatter"/>
-        /// is registered in the container, it is resolved from the container. Otherwise, the <see cref="DefaultEndpointNameFormatter"/>
-        /// is used.
+        /// Configure the specified activity type
         /// </summary>
-        /// <param name="configurator">The <see cref="IBusFactoryConfigurator"/> for the bus being configured</param>
-        /// <param name="endpointNameFormatter">Optional, the endpoint name formatter</param>
-        /// <typeparam name="T">The bus factory type (depends upon the transport)</typeparam>
-        void ConfigureEndpoints<T>(T configurator, IEndpointNameFormatter endpointNameFormatter)
-            where T : IBusFactoryConfigurator;
+        /// <param name="activityType"></param>
+        /// <param name="executeEndpointConfigurator">The configurator for the execute activity endpoint</param>
+        /// <param name="compensateAddress"></param>
+        void ConfigureActivityExecute(Type activityType, IReceiveEndpointConfigurator executeEndpointConfigurator, Uri compensateAddress);
+
+        /// <summary>
+        /// Configure the specified activity type
+        /// </summary>
+        /// <param name="activityType"></param>
+        /// <param name="compensateEndpointConfigurator">The configurator for the compensate activity endpoint</param>
+        void ConfigureActivityCompensate(Type activityType, IReceiveEndpointConfigurator compensateEndpointConfigurator);
     }
 }

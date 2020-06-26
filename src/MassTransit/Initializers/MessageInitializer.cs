@@ -18,11 +18,12 @@
         {
             _conventions = new List<IInitializerConvention>
             {
-                new CopyMessageInitializerConvention(),
+                new DefaultInitializerConvention(),
+                new DictionaryInitializerConvention()
             };
         }
 
-        public static IInitializerConvention[] Conventions => _conventionsArray ?? (_conventionsArray = _conventions.ToArray());
+        public static IInitializerConvention[] Conventions => _conventionsArray ??= _conventions.ToArray();
 
         public static void AddConvention<T>()
             where T : IInitializerConvention, new()
@@ -58,7 +59,14 @@
 
         public InitializeContext<TMessage> Create(PipeContext context)
         {
-            var baseContext = new BaseInitializeContext(context);
+            var baseContext = new ProxyInitializeContext(context);
+
+            return _factory.Create(baseContext);
+        }
+
+        public InitializeContext<TMessage> Create(CancellationToken cancellationToken)
+        {
+            var baseContext = new BaseInitializeContext(cancellationToken);
 
             return _factory.Create(baseContext);
         }
@@ -73,9 +81,9 @@
             return InitializeMessage(context, (TInput)input);
         }
 
-        public async Task Send(ISendEndpoint endpoint, object input, CancellationToken cancellationToken)
+        public async Task<TMessage> Send(ISendEndpoint endpoint, object input, CancellationToken cancellationToken)
         {
-            var messageContext = await PrepareMessage((TInput)input, cancellationToken).ConfigureAwait(false);
+            InitializeContext<TMessage, TInput> messageContext = await PrepareMessage((TInput)input, cancellationToken).ConfigureAwait(false);
 
             if (_headerInitializers.Length > 0)
             {
@@ -83,130 +91,80 @@
                     .ConfigureAwait(false);
             }
             else
-            {
                 await endpoint.Send(messageContext.Message, cancellationToken).ConfigureAwait(false);
-            }
+
+            return messageContext.Message;
         }
 
-        public async Task Send(ISendEndpoint endpoint, InitializeContext<TMessage> context, object input)
+        public async Task<TMessage> Send(ISendEndpoint endpoint, InitializeContext<TMessage> context, object input)
         {
             InitializeContext<TMessage, TInput> messageContext = await PrepareMessage(context, (TInput)input).ConfigureAwait(false);
 
             if (_headerInitializers.Length > 0)
+            {
                 await endpoint.Send(messageContext.Message, new InitializerSendContextPipe(_headerInitializers, messageContext),
                     messageContext.CancellationToken).ConfigureAwait(false);
+            }
             else
                 await endpoint.Send(messageContext.Message, messageContext.CancellationToken).ConfigureAwait(false);
+
+            return messageContext.Message;
         }
 
-        public async Task Send(ISendEndpoint endpoint, object input, IPipe<SendContext<TMessage>> pipe, CancellationToken cancellationToken)
+        public async Task<TMessage> Send(ISendEndpoint endpoint, object input, IPipe<SendContext<TMessage>> pipe, CancellationToken cancellationToken)
         {
-            var messageContext = await PrepareMessage((TInput)input, cancellationToken).ConfigureAwait(false);
+            InitializeContext<TMessage, TInput> messageContext = await PrepareMessage((TInput)input, cancellationToken).ConfigureAwait(false);
 
             await endpoint.Send(messageContext.Message,
                     _headerInitializers.Length > 0
                         ? new InitializerSendContextPipe(_headerInitializers, messageContext, pipe)
                         : pipe, cancellationToken)
                 .ConfigureAwait(false);
+
+            return messageContext.Message;
         }
 
-        public async Task Send(ISendEndpoint endpoint, object input, IPipe<SendContext> pipe, CancellationToken cancellationToken)
+        public async Task<TMessage> Send(ISendEndpoint endpoint, object input, IPipe<SendContext> pipe, CancellationToken cancellationToken)
         {
             InitializeContext<TMessage, TInput> messageContext = await PrepareMessage((TInput)input, cancellationToken).ConfigureAwait(false);
 
             if (_headerInitializers.Length > 0)
+            {
                 await endpoint.Send(messageContext.Message, new InitializerSendContextPipe(_headerInitializers, messageContext, pipe), cancellationToken)
                     .ConfigureAwait(false);
+            }
             else
                 await endpoint.Send(messageContext.Message, pipe, cancellationToken).ConfigureAwait(false);
+
+            return messageContext.Message;
         }
 
-        public async Task Send(ISendEndpoint endpoint, InitializeContext<TMessage> context, object input, IPipe<SendContext> pipe)
+        public async Task<TMessage> Send(ISendEndpoint endpoint, InitializeContext<TMessage> context, object input, IPipe<SendContext> pipe)
         {
             InitializeContext<TMessage, TInput> messageContext = await PrepareMessage(context, (TInput)input).ConfigureAwait(false);
 
             if (_headerInitializers.Length > 0)
+            {
                 await endpoint.Send(messageContext.Message, new InitializerSendContextPipe(_headerInitializers, messageContext, pipe),
                     messageContext.CancellationToken).ConfigureAwait(false);
+            }
             else
                 await endpoint.Send(messageContext.Message, pipe, messageContext.CancellationToken).ConfigureAwait(false);
+
+            return messageContext.Message;
         }
 
-        public async Task Send(ISendEndpoint endpoint, InitializeContext<TMessage> context, object input, IPipe<SendContext<TMessage>> pipe)
+        public async Task<TMessage> Send(ISendEndpoint endpoint, InitializeContext<TMessage> context, object input, IPipe<SendContext<TMessage>> pipe)
         {
             InitializeContext<TMessage, TInput> messageContext = await PrepareMessage(context, (TInput)input).ConfigureAwait(false);
 
-            var sendPipe = _headerInitializers.Length > 0
+            IPipe<SendContext<TMessage>> sendPipe = _headerInitializers.Length > 0
                 ? new InitializerSendContextPipe(_headerInitializers, messageContext, pipe)
                 : pipe;
 
             await endpoint.Send(messageContext.Message, sendPipe, messageContext.CancellationToken).ConfigureAwait(false);
-        }
 
-        public async Task Publish(IPublishEndpoint endpoint, object input, CancellationToken cancellationToken)
-        {
-            InitializeContext<TMessage, TInput> messageContext = await PrepareMessage((TInput)input, cancellationToken).ConfigureAwait(false);
-
-            if (_headerInitializers.Length > 0)
-                await endpoint.Publish(messageContext.Message, new InitializerPublishContextPipe(_headerInitializers, messageContext), cancellationToken)
-                    .ConfigureAwait(false);
-            else
-                await endpoint.Publish(messageContext.Message, cancellationToken).ConfigureAwait(false);
-        }
-
-        public async Task Publish(IPublishEndpoint endpoint, InitializeContext<TMessage> context, object input)
-        {
-            InitializeContext<TMessage, TInput> messageContext = await PrepareMessage(context, (TInput)input).ConfigureAwait(false);
-
-            if (_headerInitializers.Length > 0)
-                await endpoint.Publish(messageContext.Message, new InitializerPublishContextPipe(_headerInitializers, messageContext),
-                    messageContext.CancellationToken).ConfigureAwait(false);
-            else
-                await endpoint.Publish(messageContext.Message, messageContext.CancellationToken).ConfigureAwait(false);
-        }
-
-        public async Task Publish(IPublishEndpoint endpoint, object input, IPipe<PublishContext> pipe, CancellationToken cancellationToken)
-        {
-            InitializeContext<TMessage, TInput> messageContext = await PrepareMessage((TInput)input, cancellationToken).ConfigureAwait(false);
-
-            if (_headerInitializers.Length > 0)
-                await endpoint.Publish(messageContext.Message, new InitializerPublishContextPipe(_headerInitializers, messageContext, pipe), cancellationToken)
-                    .ConfigureAwait(false);
-            else
-                await endpoint.Publish(messageContext.Message, pipe, cancellationToken).ConfigureAwait(false);
-        }
-
-        public async Task Publish(IPublishEndpoint endpoint, object input, IPipe<PublishContext<TMessage>> pipe, CancellationToken cancellationToken)
-        {
-            InitializeContext<TMessage, TInput> messageContext = await PrepareMessage((TInput)input, cancellationToken).ConfigureAwait(false);
-
-            var publishPipe = _headerInitializers.Length > 0
-                ? new InitializerPublishContextPipe(_headerInitializers, messageContext, pipe)
-                : pipe;
-
-            await endpoint.Publish(messageContext.Message, publishPipe, cancellationToken).ConfigureAwait(false);
-        }
-
-        public async Task Publish(IPublishEndpoint endpoint, InitializeContext<TMessage> context, object input, IPipe<PublishContext> pipe)
-        {
-            InitializeContext<TMessage, TInput> messageContext = await PrepareMessage(context, (TInput)input).ConfigureAwait(false);
-
-            if (_headerInitializers.Length > 0)
-                await endpoint.Publish(messageContext.Message, new InitializerPublishContextPipe(_headerInitializers, messageContext, pipe),
-                    messageContext.CancellationToken).ConfigureAwait(false);
-            else
-                await endpoint.Publish(messageContext.Message, pipe, messageContext.CancellationToken).ConfigureAwait(false);
-        }
-
-        public async Task Publish(IPublishEndpoint endpoint, InitializeContext<TMessage> context, object input, IPipe<PublishContext<TMessage>> pipe)
-        {
-            InitializeContext<TMessage, TInput> messageContext = await PrepareMessage(context, (TInput)input).ConfigureAwait(false);
-
-            var publishPipe = _headerInitializers.Length > 0
-                ? new InitializerPublishContextPipe(_headerInitializers, messageContext, pipe)
-                : pipe;
-
-            await endpoint.Publish(messageContext.Message, publishPipe, messageContext.CancellationToken).ConfigureAwait(false);
+            return messageContext.Message;
         }
 
         Task<InitializeContext<TMessage>> InitializeMessage(TInput input, CancellationToken cancellationToken)
@@ -224,7 +182,7 @@
 
             await Task.WhenAll(_initializers.Select(x => x.Apply(inputContext))).ConfigureAwait(false);
 
-            return inputContext;
+            return messageContext;
         }
 
         Task<InitializeContext<TMessage, TInput>> PrepareMessage(TInput input, CancellationToken cancellationToken)
@@ -283,55 +241,6 @@
             }
 
             public async Task Send(SendContext<TMessage> context)
-            {
-                await Task.WhenAll(_initializers.Select(x => x.Apply(_context, context))).ConfigureAwait(false);
-
-                if (_pipe.IsNotEmpty())
-                    await _pipe.Send(context).ConfigureAwait(false);
-
-                if (_sendPipe.IsNotEmpty())
-                    await _sendPipe.Send(context).ConfigureAwait(false);
-            }
-        }
-
-
-        class InitializerPublishContextPipe :
-            IPipe<PublishContext<TMessage>>
-        {
-            readonly InitializeContext<TMessage, TInput> _context;
-            readonly IHeaderInitializer<TMessage, TInput>[] _initializers;
-            readonly IPipe<PublishContext<TMessage>> _pipe;
-            readonly IPipe<PublishContext> _sendPipe;
-
-            public InitializerPublishContextPipe(IHeaderInitializer<TMessage, TInput>[] initializers, InitializeContext<TMessage, TInput> context)
-            {
-                _initializers = initializers;
-                _context = context;
-            }
-
-            public InitializerPublishContextPipe(IHeaderInitializer<TMessage, TInput>[] initializers, InitializeContext<TMessage, TInput> context,
-                IPipe<PublishContext<TMessage>> pipe)
-            {
-                _initializers = initializers;
-                _pipe = pipe;
-                _context = context;
-            }
-
-            public InitializerPublishContextPipe(IHeaderInitializer<TMessage, TInput>[] initializers, InitializeContext<TMessage, TInput> context,
-                IPipe<PublishContext> pipe)
-            {
-                _initializers = initializers;
-                _sendPipe = pipe;
-                _context = context;
-            }
-
-            void IProbeSite.Probe(ProbeContext context)
-            {
-                _pipe?.Probe(context);
-                _sendPipe?.Probe(context);
-            }
-
-            public async Task Send(PublishContext<TMessage> context)
             {
                 await Task.WhenAll(_initializers.Select(x => x.Apply(_context, context))).ConfigureAwait(false);
 

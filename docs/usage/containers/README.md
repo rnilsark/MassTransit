@@ -1,68 +1,120 @@
-# Configuring a container
+# Containers
 
-MassTransit does not require a dependency injection container, however, it includes support for the most popular containers. Each container has its own style, and as such usage scenarios may vary.
+MassTransit supports several dependency injection containers. And since Microsoft introduced its own container, it has become the most commonly used container.
 
-MassTransit now has a consistent API for registration and configuration when using a container, as well as conventions for configuring receive endpoints based upon the registered consumers, routing slip activities, and sagas. Under the hood, each container is configured to properly interact with MassTransit, leveraging available container features, such as nested scopes for message consumers, without requiring the developer to explictly configure every consumer.
+::: tip Optional
+MassTransit does not require a container, as demonstrated in the [configuration example](/usage/configuration). So if you aren't already using a container, you can get started without having adopt one. However, when you're ready to use a container, perhaps to deploy your service using the .NET Generic Host, you will likely want to use Microsoft's built-in solution.
+:::
 
-<div class="alert alert-info">
-<b>Note:</b>
-    Dependency Injection styles are a personal choice that each developer or organization must make on their own. We recognize this choice, and respect it, and will not judge those who don't use a particular container or style of dependency injection. In short, we care.
-</div>
+Regardless of which container is used, supported containers have a consistent registration syntax used to add consumers, sagas, and activities, as well as configure the bus. Behind the scenes, MassTransit is configuring the container, including container-specific features such as scoped lifecycles, consistently and correctly. Use of the registration syntax has drastically reduced container configuration support questions.
 
-## Registration
+## Consumer Registration
 
-For containers which support registration, the `.AddMassTransit` extension method is used. There are methods supporting all consumer types, including consumers, saga, Courier activities, and saga state machines (using the container-specific extension library for Automatonymous available on [NuGet](https://www.nuget.org/packages?q=id:MassTransit.Automatonymous.*&prerelease=false)).
+> Uses [MassTransit.Extensions.DependencyInjection](https://www.nuget.org/packages/MassTransit.Extensions.DependencyInjection/)
 
-## Definition
+To configure a bus using RabbitMQ and register the consumers, sagas, and activities to be used by the bus, call the `AddMassTransit` extension method. The _UsingRabbitMq_ method can be changed to the appropriate method for the proper transport if RabbitMQ is not being used.
 
-In addition to registration, MassTransit supports an optional definition for the consumer, which can be specified (or discovered) via a class in the assembly. The syntax is under development, but some basic features are working today.
+<<< @/docs/code/containers/MicrosoftContainer.cs
 
-```csharp
-        public class SubmitOrderConsumerDefinition :
-            ConsumerDefinition<SubmitOrderConsumer>
-        {
-            public SubmitOrderConsumerDefinition()
-            {
-                // override the default endpoint name, for whatever reason
-                EndpointName = "ha-submit-order";
+The `AddConsumer` method is one of several methods used to register consumers, some of which are shown below.
 
-                // specify a concurrency limit for this consumer
-                ConcurrencyLimit = 4;
+<<< @/docs/code/containers/MicrosoftContainerAddConsumer.cs
 
-                // this is under development, doesn't do anything yet!
-                // but will eventually be used to define service endpoints
-                // in conductor.
-                Request<SubmitOrder>(x =>
-                {
-                    x.PartitionBy(m => m.CustomerId);
+## Consumer Definition
 
-                    x.Publishes<OrderReceived>();
-                    x.Responds<OrderAccepted>();
-                    x.Responds<OrderRejected>();
-                    x.Sends<ProcessOrder>();
-                });
-            }
+A consumer definition is used to configure the receive endpoint and pipeline behavior for the consumer. When scanning assemblies or namespaces for consumers, consumer definitions are also found and added to the container. The _SubmitOrderConsumer_ and matching definition are shown below.
 
-            protected override void ConfigureConsumer(IReceiveEndpointConfigurator endpointConfigurator,
-                IConsumerConfigurator<DiscoveryPingConsumer> consumerConfigurator)
-            {
-                endpointConfigurator.UseMessageRetry(r => r.Interval(5,1000));
-                endpointConfigurator.UseInMemoryOutbox();
-            }
-        }
+<<< @/docs/code/containers/ContainerConsumers.cs
+
+## Endpoint Definition
+
+To configure the endpoint for a consumer registration, or override the endpoint configuration in the definition, the `Endpoint` method can be added to the consumer registration. This will create an endpoint definition for the consumer, and register it in the container. This method is available on consumer and saga registrations, with separate execute and compensate endpoint methods for activities.
+
+<<< @/docs/code/containers/MicrosoftContainerAddConsumerEndpoint.cs
+
+When the endpoint is configured after the _AddConsumer_ method, the configuration overrides any endpoint configuration in the consumer definition.
+
+## Bus Configuration
+
+In the above examples, the bus is configured by the _UsingRabbitMq_ method, which is passed two arguments. `context` is the registration context, used to configure endpoints. `cfg` is the bus factory configurator, used to configure the bus. The above examples use the default conventions to configure the endpoints. Alternatively, endpoints can be explicitly configured. However, when configuring endpoints manually, the _ConfigureEndpoints_ methods should not be used (duplicate endpoints may result).
+
+_ConfigureEndpoints_ uses an `IEndpointNameFormatter` to generate endpoint names, which by default uses a _PascalCase_ formatter. There are two additional endpoint name formatters included, snake and kebab case.
+
+For the _SubmitOrderConsumer_, the endpoint names would be:
+
+| Formatter | Name
+|:---|:---
+| Default | `SubmitOrder`
+| Snake Case | `submit_order`
+| Kebab Case | `submit-order`
+
+All of the included formatters trim the _Consumer_, _Saga_, or _Activity_ suffix from the end of the class name. If the consumer name is generic, the generic parameter type is used instead of the generic type.
+
+The endpoint name formatter can be set as shown below.
+
+<<< @/docs/code/containers/MicrosoftContainerFormatter.cs
+
+The endpoint formatter can also be passed to the _ConfigureEndpoints_ method as shown.
+
+<<< @/docs/code/containers/MicrosoftContainerFormatterInline.cs
+
+To explicitly configure endpoints, use the _ConfigureConsumer_ and/or _ConfigureConsumers_ methods.
+
+<<< @/docs/code/containers/MicrosoftContainerConfigureConsumer.cs
+
+When using _ConfigureConsumer_, the _EndpointName_, _PrefetchCount_, and _Temporary_ properties of the consumer definition are not used.
+
+## Saga Registration
+
+To add a state machine saga, use the _AddSagaStateMachine_ methods. For a consumer saga, use the _AddSaga_ methods.
+
+::: tip Important
+State machine sagas should be added before class-based sagas, and the class-based saga methods should not be used to add state machine sagas. This may be simplified in the future, but for now, be aware of this registration requirement.
+:::
+
+```cs
+containerBuilder.AddMassTransit(r =>
+{
+    // add a state machine saga, with the in-memory repository
+    r.AddSagaStateMachine<OrderStateMachine, OrderState>()
+        .InMemoryRepository();
+
+    // add a consumer saga with the in-memory repository
+    r.AddSaga<OrderSaga>()
+        .InMemoryRepository();
+
+    // add a saga by type, without a repository. The repository should be registered
+    // in the container elsewhere
+    r.AddSaga(typeof(OrderSaga));
+
+    // add a state machine saga by type, including a saga definition for that saga
+    r.AddSagaStateMachine(typeof(OrderState), typeof(OrderStateDefinition))
+
+    // add all saga state machines by type
+    r.AddSagaStateMachines(Assembly.GetExecutingAssembly());
+
+    // add all sagas in the specified assembly
+    r.AddSagas(Assembly.GetExecutingAssembly());
+
+    // add sagas from the namespace containing the type
+    r.AddSagasFromNamespaceContaining<OrderSaga>();
+    r.AddSagasFromNamespaceContaining(typeof(OrderSaga));
+});
 ```
 
-There are definitions for all consumer types, including sagas, activities, and saga state machines. They can be registered explicity using the `.AddConsumer(consumer type, consumerDefinitionType)` methods, or can be discovered using the scanning methods, such as `.AddConsumersFromNamespaceContaining<SubmitOrderConsumer>()`. 
+To add a saga registration and configure the consumer endpoint in the same expression, a definition can automatically be created.
 
+```cs
+containerBuilder.AddMassTransit(r =>
+{
+    r.AddSagaStateMachine<OrderStateMachine, OrderState>()
+        .NHibernateRepository()
+        .Endpoint(e =>
+        {
+            e.Name = "order-state";
+            e.ConcurrentMessageLimit = 8;
+        });
+});
+```
 
-**Hey! Where is my container??**
-
-Containers come and go, so if you don't see your container here, or feel that the support for you container is weaksauce, pull requests are always welcome. Using an existing container it should be straight forward to add support for your favorite ÜberContainer.
-
-* [Autofac](autofac.md)
-* [Ninject](ninject.md)
-* [StructureMap](structuremap.md)
-* [Lamar](lamar.md)
-* [Unity](unity.md)
-* [Castle Windsor](castlewindsor.md)
-* [Microsoft Dependency Injection](msdi.md)
+Supported saga persistence storage engines are documented in the [saga documentation](/usage/sagas/persistence) section.

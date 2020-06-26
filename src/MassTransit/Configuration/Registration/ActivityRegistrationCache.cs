@@ -1,52 +1,39 @@
-// Copyright 2007-2019 Chris Patterson, Dru Sellers, Travis Smith, et. al.
-//
-// Licensed under the Apache License, Version 2.0 (the "License"); you may not use
-// this file except in compliance with the License. You may obtain a copy of the
-// License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software distributed
-// under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
-// CONDITIONS OF ANY KIND, either express or implied. See the License for the
-// specific language governing permissions and limitations under the License.
 namespace MassTransit.Registration
 {
     using System;
-    using System.Collections.Concurrent;
     using System.Linq;
     using Courier;
     using Internals.Extensions;
-    using Util;
+    using Metadata;
 
 
     public static class ActivityRegistrationCache
     {
-        static CachedRegistration GetOrAdd(Type activityType)
-        {
-            if (!activityType.HasInterface(typeof(Activity<,>)))
-                throw new ArgumentException($"The type is not an activity: {TypeMetadataCache.GetShortName(activityType)}", nameof(activityType));
-
-            var argumentLogTypes = activityType.GetClosingArguments(typeof(Activity<,>)).ToArray();
-            var genericType = typeof(CachedRegistration<,,>).MakeGenericType(activityType, argumentLogTypes[0], argumentLogTypes[1]);
-
-            return Cached.Instance.GetOrAdd(activityType, _ => (CachedRegistration)Activator.CreateInstance(genericType));
-        }
-
         public static void Register(Type activityType, IContainerRegistrar registrar)
         {
-            GetOrAdd(activityType).Register(registrar);
+            Cached.Instance.GetOrAdd(activityType).Register(registrar);
         }
 
         public static IActivityRegistration CreateRegistration(Type activityType, Type activityDefinitionType, IContainerRegistrar registrar)
         {
-            return GetOrAdd(activityType).CreateRegistration(activityDefinitionType, registrar);
+            return Cached.Instance.GetOrAdd(activityType).CreateRegistration(activityDefinitionType, registrar);
+        }
+
+        static CachedRegistration Factory(Type activityType)
+        {
+            if (!activityType.HasInterface(typeof(IActivity<,>)))
+                throw new ArgumentException($"The type is not an activity: {TypeMetadataCache.GetShortName(activityType)}", nameof(activityType));
+
+            Type[] argumentLogTypes = activityType.GetClosingArguments(typeof(IActivity<,>)).ToArray();
+            var genericType = typeof(CachedRegistration<,,>).MakeGenericType(activityType, argumentLogTypes[0], argumentLogTypes[1]);
+
+            return (CachedRegistration)Activator.CreateInstance(genericType);
         }
 
 
         static class Cached
         {
-            internal static readonly ConcurrentDictionary<Type, CachedRegistration> Instance = new ConcurrentDictionary<Type, CachedRegistration>();
+            internal static readonly RegistrationCache<CachedRegistration> Instance = new RegistrationCache<CachedRegistration>(Factory);
         }
 
 
@@ -59,7 +46,7 @@ namespace MassTransit.Registration
 
         class CachedRegistration<TActivity, TArguments, TLog> :
             CachedRegistration
-            where TActivity : class, Activity<TArguments, TLog>
+            where TActivity : class, IActivity<TArguments, TLog>
             where TArguments : class
             where TLog : class
         {

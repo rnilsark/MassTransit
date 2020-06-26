@@ -11,8 +11,8 @@ namespace MassTransit.Initializers.TypeConverters
     public class TypeConverterCache :
         ITypeConverterCache
     {
-        readonly ConcurrentDictionary<Type, object> _typeConverters;
         readonly IList<object> _converters;
+        readonly ConcurrentDictionary<Type, object> _typeConverters;
 
         TypeConverterCache()
         {
@@ -22,7 +22,7 @@ namespace MassTransit.Initializers.TypeConverters
             var assembly = typeof(BooleanTypeConverter).Assembly;
             var ns = typeof(BooleanTypeConverter).Namespace;
 
-            var converterTypes = AssemblyTypeCache.FindTypes(assembly, TypeClassification.Concrete | TypeClassification.Closed,
+            Type[] converterTypes = AssemblyTypeCache.FindTypes(assembly, TypeClassification.Concrete | TypeClassification.Closed,
                 x => x.Namespace.StartsWith(ns) && x.HasInterface(typeof(ITypeConverter<,>))).GetAwaiter().GetResult().ToArray();
 
             foreach (var converterType in converterTypes)
@@ -33,7 +33,7 @@ namespace MassTransit.Initializers.TypeConverters
         {
             var neededType = typeof(ITypeConverter<TProperty, TInput>);
 
-            if (_typeConverters.TryGetValue(neededType, out object converter))
+            if (_typeConverters.TryGetValue(neededType, out var converter))
             {
                 typeConverter = converter as ITypeConverter<TProperty, TInput>;
                 return typeConverter != null;
@@ -48,27 +48,59 @@ namespace MassTransit.Initializers.TypeConverters
                 return typeConverter != null;
             }
 
-            Type propertyType = typeof(TProperty);
+            var propertyType = typeof(TProperty);
             if (propertyType.IsEnum)
             {
                 var enumConverterType = typeof(EnumTypeConverter<>).MakeGenericType(propertyType);
                 if (enumConverterType.HasInterface(neededType))
-                {
                     AddSupportedTypes(enumConverterType);
-
-                    if (_typeConverters.TryGetValue(neededType, out converter))
+            }
+            else if (propertyType.IsNullable(out var underlyingType))
+            {
+                if (underlyingType == typeof(TInput))
+                {
+                    var nullableType = typeof(ToNullableTypeConverter<>).MakeGenericType(underlyingType);
+                    AddSupportedTypes(nullableType);
+                }
+                else
+                {
+                    var converterType = typeof(ITypeConverter<,>).MakeGenericType(underlyingType, typeof(TInput));
+                    if (_typeConverters.TryGetValue(converterType, out converter))
                     {
-                        typeConverter = converter as ITypeConverter<TProperty, TInput>;
-                        return typeConverter != null;
+                        var nullableType = typeof(ToNullableTypeConverter<,>).MakeGenericType(underlyingType, typeof(TInput));
+                        AddSupportedTypes(nullableType, converter);
                     }
                 }
+            }
+            else if (typeof(TInput).IsNullable(out underlyingType))
+            {
+                if (underlyingType == propertyType)
+                {
+                    var nullableType = typeof(FromNullableTypeConverter<>).MakeGenericType(underlyingType);
+                    AddSupportedTypes(nullableType);
+                }
+                else
+                {
+                    var converterType = typeof(ITypeConverter<,>).MakeGenericType(propertyType, underlyingType);
+                    if (_typeConverters.TryGetValue(converterType, out converter))
+                    {
+                        var nullableType = typeof(FromNullableTypeConverter<,>).MakeGenericType(propertyType, underlyingType);
+                        AddSupportedTypes(nullableType, converter);
+                    }
+                }
+            }
+
+            if (_typeConverters.TryGetValue(neededType, out converter))
+            {
+                typeConverter = converter as ITypeConverter<TProperty, TInput>;
+                return typeConverter != null;
             }
 
             typeConverter = null;
             return false;
         }
 
-        void AddSupportedTypes(Type converterType)
+        void AddSupportedTypes(Type converterType, params object[] args)
         {
             Type[] interfaceTypes = converterType.GetInterfaces();
 
@@ -77,7 +109,7 @@ namespace MassTransit.Initializers.TypeConverters
             {
                 try
                 {
-                    var converter = Activator.CreateInstance(converterType);
+                    var converter = Activator.CreateInstance(converterType, args);
                     _converters.Add(converter);
 
                     foreach (var type in types)

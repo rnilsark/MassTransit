@@ -1,29 +1,20 @@
-﻿// Copyright 2007-2016 Chris Patterson, Dru Sellers, Travis Smith, et. al.
-//  
-// Licensed under the Apache License, Version 2.0 (the "License"); you may not use
-// this file except in compliance with the License. You may obtain a copy of the 
-// License at 
-// 
-//     http://www.apache.org/licenses/LICENSE-2.0 
-// 
-// Unless required by applicable law or agreed to in writing, software distributed
-// under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR 
-// CONDITIONS OF ANY KIND, either express or implied. See the License for the 
-// specific language governing permissions and limitations under the License.
-namespace MassTransit.Courier
+﻿namespace MassTransit.Courier
 {
     using System;
+    using System.Collections.Generic;
     using System.Linq;
     using System.Threading.Tasks;
     using Contracts;
     using Events;
+    using Metadata;
 
 
-    public abstract class RoutingSlipResponseProxy<TRequest, TResponse> :
+    public abstract class RoutingSlipResponseProxy<TRequest, TResponse, TFaultResponse> :
         IConsumer<RoutingSlipCompleted>,
         IConsumer<RoutingSlipFaulted>
         where TRequest : class
         where TResponse : class
+        where TFaultResponse : class
     {
         public async Task Consume(ConsumeContext<RoutingSlipCompleted> context)
         {
@@ -31,20 +22,17 @@ namespace MassTransit.Courier
             var requestId = context.Message.GetVariable<Guid>("RequestId");
 
             Uri responseAddress = null;
-            if (context.Message.Variables.ContainsKey("FaultAddress"))
-                responseAddress = context.Message.GetVariable<Uri>("FaultAddress");
-            if (responseAddress == null && context.Message.Variables.ContainsKey("ResponseAddress"))
+            if (context.Message.Variables.ContainsKey("ResponseAddress"))
                 responseAddress = context.Message.GetVariable<Uri>("ResponseAddress");
 
             if (responseAddress == null)
                 throw new ArgumentException($"The response address could not be found for the faulted routing slip: {context.Message.TrackingNumber}");
 
-            var endpoint = await context.GetSendEndpoint(responseAddress).ConfigureAwait(false);
+            var endpoint = await context.GetResponseEndpoint<TResponse>(responseAddress, requestId).ConfigureAwait(false);
 
-            var response = CreateResponseMessage(context, request);
+            var response = await CreateResponseMessage(context, request);
 
-            await endpoint.Send(response, x => x.RequestId = requestId)
-                .ConfigureAwait(false);
+            await endpoint.Send(response).ConfigureAwait(false);
         }
 
         public async Task Consume(ConsumeContext<RoutingSlipFaulted> context)
@@ -52,24 +40,40 @@ namespace MassTransit.Courier
             var request = context.Message.GetVariable<TRequest>("Request");
             var requestId = context.Message.GetVariable<Guid>("RequestId");
 
-            Uri responseAddress = null;
+            Uri faultAddress = null;
             if (context.Message.Variables.ContainsKey("FaultAddress"))
-                responseAddress = context.Message.GetVariable<Uri>("FaultAddress");
-            if (responseAddress == null && context.Message.Variables.ContainsKey("ResponseAddress"))
-                responseAddress = context.Message.GetVariable<Uri>("ResponseAddress");
+                faultAddress = context.Message.GetVariable<Uri>("FaultAddress");
+            if (faultAddress == null && context.Message.Variables.ContainsKey("ResponseAddress"))
+                faultAddress = context.Message.GetVariable<Uri>("ResponseAddress");
 
-            if (responseAddress == null)
-                throw new ArgumentException($"The response address could not be found for the faulted routing slip: {context.Message.TrackingNumber}");
+            if (faultAddress == null)
+                throw new ArgumentException($"The fault/response address could not be found for the faulted routing slip: {context.Message.TrackingNumber}");
 
-            var endpoint = await context.GetSendEndpoint(responseAddress).ConfigureAwait(false);
+            var endpoint = await context.GetFaultEndpoint<TResponse>(faultAddress, requestId).ConfigureAwait(false);
 
-            ActivityException[] exceptions = context.Message.ActivityExceptions;
+            var response = await CreateFaultedResponseMessage(context, request, requestId);
 
-            await endpoint.Send<Fault<TRequest>>(new FaultEvent<TRequest>(request, requestId, context.Host, exceptions.Select(x => x.ExceptionInfo)),
-                x => x.RequestId = requestId)
-                .ConfigureAwait(false);
+            await endpoint.Send(response).ConfigureAwait(false);
         }
 
-        protected abstract TResponse CreateResponseMessage(ConsumeContext<RoutingSlipCompleted> context, TRequest request);
+        protected abstract Task<TResponse> CreateResponseMessage(ConsumeContext<RoutingSlipCompleted> context, TRequest request);
+
+        protected abstract Task<TFaultResponse> CreateFaultedResponseMessage(ConsumeContext<RoutingSlipFaulted> context, TRequest request, Guid requestId);
+    }
+
+
+    public abstract class RoutingSlipResponseProxy<TRequest, TResponse> :
+        RoutingSlipResponseProxy<TRequest, TResponse, Fault<TRequest>>
+        where TRequest : class
+        where TResponse : class
+    {
+        protected override Task<Fault<TRequest>> CreateFaultedResponseMessage(ConsumeContext<RoutingSlipFaulted> context, TRequest request, Guid requestId)
+        {
+            IEnumerable<ExceptionInfo> exceptions = context.Message.ActivityExceptions.Select(x => x.ExceptionInfo);
+
+            Fault<TRequest> response = new FaultEvent<TRequest>(request, requestId, context.Host, exceptions, TypeMetadataCache<TRequest>.MessageTypeNames);
+
+            return Task.FromResult(response);
+        }
     }
 }

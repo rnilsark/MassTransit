@@ -1,23 +1,15 @@
-// Copyright 2007-2019 Chris Patterson, Dru Sellers, Travis Smith, et. al.
-//
-// Licensed under the Apache License, Version 2.0 (the "License"); you may not use
-// this file except in compliance with the License. You may obtain a copy of the
-// License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software distributed
-// under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
-// CONDITIONS OF ANY KIND, either express or implied. See the License for the
-// specific language governing permissions and limitations under the License.
 namespace MassTransit.Registration
 {
     using System;
-    using System.Collections.Concurrent;
-    using System.Linq;
+    using Automatonymous;
     using ConsumeConfigurators;
+    using Context;
+    using Courier;
     using Definition;
-    using Util;
+    using Internals.Extensions;
+    using Metadata;
+    using Microsoft.Extensions.Logging;
+    using Saga;
 
 
     /// <summary>
@@ -26,143 +18,234 @@ namespace MassTransit.Registration
     public class RegistrationConfigurator :
         IRegistrationConfigurator
     {
-        readonly IContainerRegistrar _containerRegistrar;
-        readonly ConcurrentDictionary<Type, IConsumerRegistration> _consumerRegistrations;
-        readonly ConcurrentDictionary<Type, IExecuteActivityRegistration> _executeActivityRegistrations;
-        readonly ConcurrentDictionary<Type, IActivityRegistration> _activityRegistrations;
-        readonly ConcurrentDictionary<Type, ISagaRegistration> _sagaRegistrations;
-        readonly ConcurrentDictionary<Type, IEndpointRegistration> _endpointRegistrations;
+        readonly RegistrationCache<IActivityRegistration> _activities;
+        readonly RegistrationCache<IConsumerRegistration> _consumers;
+        readonly RegistrationCache<IEndpointRegistration> _endpoints;
+        readonly RegistrationCache<IExecuteActivityRegistration> _executeActivities;
+        readonly RegistrationCache<ISagaRegistration> _sagas;
+        bool _configured;
 
-        public RegistrationConfigurator(IContainerRegistrar containerRegistrar = null)
+        protected RegistrationConfigurator(IContainerRegistrar registrar = null)
         {
-            _containerRegistrar = containerRegistrar ?? new NullContainerRegistrar();
+            Registrar = registrar ?? new NullContainerRegistrar();
 
-            _consumerRegistrations = new ConcurrentDictionary<Type, IConsumerRegistration>();
-            _sagaRegistrations = new ConcurrentDictionary<Type, ISagaRegistration>();
-            _executeActivityRegistrations = new ConcurrentDictionary<Type, IExecuteActivityRegistration>();
-            _activityRegistrations = new ConcurrentDictionary<Type, IActivityRegistration>();
-            _endpointRegistrations = new ConcurrentDictionary<Type, IEndpointRegistration>();
+            _consumers = new RegistrationCache<IConsumerRegistration>();
+            _sagas = new RegistrationCache<ISagaRegistration>();
+            _executeActivities = new RegistrationCache<IExecuteActivityRegistration>();
+            _activities = new RegistrationCache<IActivityRegistration>();
+            _endpoints = new RegistrationCache<IEndpointRegistration>();
         }
 
-        IConsumerRegistrationConfigurator<T> IRegistrationConfigurator.AddConsumer<T>(Action<IConsumerConfigurator<T>> configure)
+        protected IRegistrationCache<IActivityRegistration> Activities => _activities;
+        protected IRegistrationCache<IConsumerRegistration> Consumers => _consumers;
+        protected IRegistrationCache<IEndpointRegistration> Endpoints => _endpoints;
+        protected IRegistrationCache<IExecuteActivityRegistration> ExecuteActivities => _executeActivities;
+        protected IRegistrationCache<ISagaRegistration> Sagas => _sagas;
+
+        public IContainerRegistrar Registrar { get; }
+
+        protected Func<IConfigurationServiceProvider, IBus, IClientFactory> ClientFactoryProvider { get; private set; } = BusClientFactoryProvider;
+
+        public IConsumerRegistrationConfigurator<T> AddConsumer<T>(Action<IConsumerConfigurator<T>> configure)
+            where T : class, IConsumer
+        {
+            return AddConsumer(null, configure);
+        }
+
+        public IConsumerRegistrationConfigurator<T> AddConsumer<T>(Type consumerDefinitionType, Action<IConsumerConfigurator<T>> configure = null)
+            where T : class, IConsumer
         {
             if (TypeMetadataCache<T>.HasSagaInterfaces)
                 throw new ArgumentException($"{TypeMetadataCache<T>.ShortName} is a saga, and cannot be registered as a consumer", nameof(T));
 
             IConsumerRegistration ValueFactory(Type type)
             {
-                ConsumerRegistrationCache.Register(type, _containerRegistrar);
+                ConsumerRegistrationCache.Register(type, Registrar);
+
+                if (consumerDefinitionType != null)
+                    ConsumerDefinitionRegistrationCache.Register(consumerDefinitionType, Registrar);
 
                 return new ConsumerRegistration<T>();
             }
 
-            var registration = _consumerRegistrations.GetOrAdd(typeof(T), ValueFactory);
+            var registration = _consumers.GetOrAdd(typeof(T), ValueFactory);
 
             registration.AddConfigureAction(configure);
 
-            return new ConsumerRegistrationConfigurator<T>(this, registration, _containerRegistrar);
+            return new ConsumerRegistrationConfigurator<T>(this);
         }
 
-        void IRegistrationConfigurator.AddConsumer(Type consumerType, Type consumerDefinitionType)
+        public void AddConsumer(Type consumerType, Type consumerDefinitionType)
         {
             if (TypeMetadataCache.HasSagaInterfaces(consumerType))
+            {
                 throw new ArgumentException($"{TypeMetadataCache.GetShortName(consumerType)} is a saga, and cannot be registered as a consumer",
                     nameof(consumerType));
+            }
 
             IConsumerRegistration ValueFactory(Type type)
             {
-                ConsumerRegistrationCache.Register(type, _containerRegistrar);
+                ConsumerRegistrationCache.Register(type, Registrar);
 
                 if (consumerDefinitionType != null)
-                    ConsumerDefinitionRegistrationCache.Register(consumerDefinitionType, _containerRegistrar);
+                    ConsumerDefinitionRegistrationCache.Register(consumerDefinitionType, Registrar);
 
                 return (IConsumerRegistration)Activator.CreateInstance(typeof(ConsumerRegistration<>).MakeGenericType(type));
             }
 
-            _consumerRegistrations.GetOrAdd(consumerType, ValueFactory);
+            _consumers.GetOrAdd(consumerType, ValueFactory);
         }
 
-        ISagaRegistrationConfigurator<T> IRegistrationConfigurator.AddSaga<T>(Action<ISagaConfigurator<T>> configure)
+        public ISagaRegistrationConfigurator<T> AddSaga<T>(Action<ISagaConfigurator<T>> configure)
+            where T : class, ISaga
         {
+            return AddSaga(null, configure);
+        }
+
+        public ISagaRegistrationConfigurator<T> AddSaga<T>(Type sagaDefinitionType, Action<ISagaConfigurator<T>> configure = null)
+            where T : class, ISaga
+        {
+            if (typeof(T).HasInterface<SagaStateMachineInstance>())
+                throw new ArgumentException($"State machine sagas must be registered using AddSagaStateMachine: {TypeMetadataCache<T>.ShortName}");
+
             ISagaRegistration ValueFactory(Type type)
             {
-                SagaRegistrationCache.Register(type, _containerRegistrar);
+                SagaRegistrationCache.Register(type, Registrar);
+
+                if (sagaDefinitionType != null)
+                    SagaDefinitionRegistrationCache.Register(sagaDefinitionType, Registrar);
 
                 return new SagaRegistration<T>();
             }
 
-            var registration = _sagaRegistrations.GetOrAdd(typeof(T), ValueFactory);
+            var registration = _sagas.GetOrAdd(typeof(T), ValueFactory);
 
             registration.AddConfigureAction(configure);
 
-            return new SagaRegistrationConfigurator<T>(this, registration, _containerRegistrar);
+            return new SagaRegistrationConfigurator<T>(this, Registrar);
         }
 
-        ISagaRegistrationConfigurator<T> IRegistrationConfigurator.AddSaga<T>(SagaRegistrationFactory<T> factory, Action<ISagaConfigurator<T>> configure)
+        public void AddSaga(Type sagaType, Type sagaDefinitionType)
         {
-            var registration = _sagaRegistrations.GetOrAdd(typeof(T), _ => factory(_containerRegistrar));
+            if (sagaType.HasInterface<SagaStateMachineInstance>())
+                throw new ArgumentException($"State machine sagas must be registered using AddSagaStateMachine: {TypeMetadataCache.GetShortName(sagaType)}");
+
+            _sagas.GetOrAdd(sagaType, type => SagaRegistrationCache.CreateRegistration(type, sagaDefinitionType, Registrar));
+        }
+
+        public ISagaRegistrationConfigurator<T> AddSagaStateMachine<TStateMachine, T>(Action<ISagaConfigurator<T>> configure = null)
+            where TStateMachine : class, SagaStateMachine<T>
+            where T : class, SagaStateMachineInstance
+        {
+            return AddSagaStateMachine<TStateMachine, T>(null, configure);
+        }
+
+        public ISagaRegistrationConfigurator<T> AddSagaStateMachine<TStateMachine, T>(Type sagaDefinitionType, Action<ISagaConfigurator<T>> configure = null)
+            where TStateMachine : class, SagaStateMachine<T>
+            where T : class, SagaStateMachineInstance
+        {
+            ISagaRegistration ValueFactory(Type type)
+            {
+                SagaStateMachineRegistrationCache.Register(typeof(TStateMachine), Registrar);
+
+                if (sagaDefinitionType != null)
+                    SagaDefinitionRegistrationCache.Register(sagaDefinitionType, Registrar);
+
+                return new SagaStateMachineRegistration<T>();
+            }
+
+            var registration = _sagas.GetOrAdd(typeof(T), ValueFactory);
 
             registration.AddConfigureAction(configure);
 
-            return new SagaRegistrationConfigurator<T>(this, registration, _containerRegistrar);
+            return new SagaRegistrationConfigurator<T>(this, Registrar);
         }
 
-        void IRegistrationConfigurator.AddSaga(Type sagaType, Type sagaDefinitionType)
+        public void AddSagaStateMachine(Type sagaType, Type sagaDefinitionType)
         {
-            _sagaRegistrations.GetOrAdd(sagaType, type => SagaRegistrationCache.CreateRegistration(type, sagaDefinitionType, _containerRegistrar));
+            SagaStateMachineRegistrationCache.AddSagaStateMachine(this, sagaType, sagaDefinitionType);
         }
 
-        IExecuteActivityRegistrationConfigurator<TActivity, TArguments> IRegistrationConfigurator.AddExecuteActivity<TActivity, TArguments>(
+        public IExecuteActivityRegistrationConfigurator<TActivity, TArguments> AddExecuteActivity<TActivity, TArguments>(
             Action<IExecuteActivityConfigurator<TActivity, TArguments>> configure)
+            where TActivity : class, IExecuteActivity<TArguments>
+            where TArguments : class
+        {
+            return AddExecuteActivity(null, configure);
+        }
+
+        public IExecuteActivityRegistrationConfigurator<TActivity, TArguments> AddExecuteActivity<TActivity, TArguments>(Type executeActivityDefinitionType,
+            Action<IExecuteActivityConfigurator<TActivity, TArguments>> configure = null)
+            where TActivity : class, IExecuteActivity<TArguments>
+            where TArguments : class
         {
             IExecuteActivityRegistration ValueFactory(Type type)
             {
-                ExecuteActivityRegistrationCache.Register(type, _containerRegistrar);
+                ExecuteActivityRegistrationCache.Register(type, Registrar);
+
+                if (executeActivityDefinitionType != null)
+                    ExecuteActivityDefinitionRegistrationCache.Register(executeActivityDefinitionType, Registrar);
 
                 return new ExecuteActivityRegistration<TActivity, TArguments>();
             }
 
-            var registration = _executeActivityRegistrations.GetOrAdd(typeof(TActivity), ValueFactory);
+            var registration = _executeActivities.GetOrAdd(typeof(TActivity), ValueFactory);
 
             registration.AddConfigureAction(configure);
 
-            return new ExecuteActivityRegistrationConfigurator<TActivity, TArguments>(this, registration, _containerRegistrar);
+            return new ExecuteActivityRegistrationConfigurator<TActivity, TArguments>(this);
         }
 
-        void IRegistrationConfigurator.AddExecuteActivity(Type activityType, Type activityDefinitionType)
+        public void AddExecuteActivity(Type activityType, Type activityDefinitionType)
         {
-            _executeActivityRegistrations.GetOrAdd(activityType,
-                type => ExecuteActivityRegistrationCache.CreateRegistration(type, activityDefinitionType, _containerRegistrar));
+            _executeActivities.GetOrAdd(activityType,
+                type => ExecuteActivityRegistrationCache.CreateRegistration(type, activityDefinitionType, Registrar));
         }
 
-        IActivityRegistrationConfigurator<TActivity, TArguments, TLog> IRegistrationConfigurator.AddActivity<TActivity, TArguments, TLog>(
+        public IActivityRegistrationConfigurator<TActivity, TArguments, TLog> AddActivity<TActivity, TArguments, TLog>(
             Action<IExecuteActivityConfigurator<TActivity, TArguments>> configureExecute,
             Action<ICompensateActivityConfigurator<TActivity, TLog>> configureCompensate)
+            where TActivity : class, IActivity<TArguments, TLog>
+            where TArguments : class
+            where TLog : class
+        {
+            return AddActivity(null, configureExecute, configureCompensate);
+        }
+
+        public IActivityRegistrationConfigurator<TActivity, TArguments, TLog> AddActivity<TActivity, TArguments, TLog>(Type activityDefinitionType,
+            Action<IExecuteActivityConfigurator<TActivity, TArguments>> configureExecute = null,
+            Action<ICompensateActivityConfigurator<TActivity, TLog>> configureCompensate = null)
+            where TActivity : class, IActivity<TArguments, TLog>
+            where TArguments : class
+            where TLog : class
         {
             IActivityRegistration ValueFactory(Type type)
             {
-                ActivityRegistrationCache.Register(type, _containerRegistrar);
+                ActivityRegistrationCache.Register(type, Registrar);
+
+                if (activityDefinitionType != null)
+                    ActivityDefinitionRegistrationCache.Register(activityDefinitionType, Registrar);
 
                 return new ActivityRegistration<TActivity, TArguments, TLog>();
             }
 
-            var registration = _activityRegistrations.GetOrAdd(typeof(TActivity), ValueFactory);
+            var registration = _activities.GetOrAdd(typeof(TActivity), ValueFactory);
 
             registration.AddConfigureAction(configureExecute);
             registration.AddConfigureAction(configureCompensate);
 
-            return new ActivityRegistrationConfigurator<TActivity, TArguments, TLog>(this, registration, _containerRegistrar);
+            return new ActivityRegistrationConfigurator<TActivity, TArguments, TLog>(this);
         }
 
         public void AddActivity(Type activityType, Type activityDefinitionType)
         {
-            _activityRegistrations.GetOrAdd(activityType,
-                type => ActivityRegistrationCache.CreateRegistration(type, activityDefinitionType, _containerRegistrar));
+            _activities.GetOrAdd(activityType,
+                type => ActivityRegistrationCache.CreateRegistration(type, activityDefinitionType, Registrar));
         }
 
         public void AddEndpoint(Type definitionType)
         {
-            _endpointRegistrations.GetOrAdd(definitionType, type => EndpointRegistrationCache.CreateRegistration(definitionType, _containerRegistrar));
+            _endpoints.GetOrAdd(definitionType, type => EndpointRegistrationCache.CreateRegistration(definitionType, Registrar));
         }
 
         public void AddEndpoint<TDefinition, T>(IEndpointSettings<IEndpointDefinition<T>> settings)
@@ -171,29 +254,73 @@ namespace MassTransit.Registration
         {
             IEndpointRegistration ValueFactory(Type type)
             {
-                _containerRegistrar.RegisterEndpointDefinition<TDefinition, T>(settings);
+                Registrar.RegisterEndpointDefinition<TDefinition, T>(settings);
 
                 return new EndpointRegistration<T>();
             }
 
-            _endpointRegistrations.GetOrAdd(typeof(TDefinition), ValueFactory);
+            _endpoints.GetOrAdd(typeof(TDefinition), ValueFactory);
         }
 
-        void IRegistrationConfigurator.AddRequestClient<T>(RequestTimeout timeout)
+        public void AddRequestClient<T>(RequestTimeout timeout)
+            where T : class
         {
-            _containerRegistrar.RegisterRequestClient<T>(timeout);
+            Registrar.RegisterRequestClient<T>(timeout);
         }
 
-        void IRegistrationConfigurator.AddRequestClient<T>(Uri destinationAddress, RequestTimeout timeout)
+        public void AddRequestClient<T>(Uri destinationAddress, RequestTimeout timeout)
+            where T : class
         {
-            _containerRegistrar.RegisterRequestClient<T>(destinationAddress, timeout);
+            Registrar.RegisterRequestClient<T>(destinationAddress, timeout);
         }
 
-        public IRegistration CreateRegistration(IConfigurationServiceProvider configurationServiceProvider)
+        public void AddServiceClient(Action<IServiceClientConfigurator> configure = default)
         {
-            return new Registration(configurationServiceProvider, _consumerRegistrations.ToDictionary(x => x.Key, x => x.Value),
-                _sagaRegistrations.ToDictionary(x => x.Key, x => x.Value), _executeActivityRegistrations.ToDictionary(x => x.Key, x => x.Value),
-                _activityRegistrations.ToDictionary(x => x.Key, x => x.Value), _endpointRegistrations.ToDictionary(x => x.Key, x => x.Value));
+            var options = new ServiceClientOptions();
+
+            Registrar.RegisterSingleInstance(options);
+
+            ClientFactoryProvider = ServiceClientClientFactoryProvider;
+        }
+
+        public void SetEndpointNameFormatter(IEndpointNameFormatter endpointNameFormatter)
+        {
+            Registrar.RegisterSingleInstance(endpointNameFormatter);
+        }
+
+        public void AddMessageScheduler(IMessageSchedulerRegistration registration)
+        {
+            registration.Register(Registrar);
+        }
+
+        protected IRegistration CreateRegistration(IConfigurationServiceProvider provider)
+        {
+            return new Registration(provider, Consumers, Sagas, ExecuteActivities, Activities);
+        }
+
+        protected void ThrowIfAlreadyConfigured(string methodName)
+        {
+            if (_configured)
+                throw new ConfigurationException($"'{methodName}' can be called only once.");
+
+            _configured = true;
+        }
+
+        protected static void ConfigureLogContext(IConfigurationServiceProvider provider)
+        {
+            var loggerFactory = provider.GetService<ILoggerFactory>();
+            if (loggerFactory != null)
+                LogContext.ConfigureCurrentLogContext(loggerFactory);
+        }
+
+        static IClientFactory BusClientFactoryProvider(IConfigurationServiceProvider provider, IBus bus)
+        {
+            return bus.CreateClientFactory();
+        }
+
+        static IClientFactory ServiceClientClientFactoryProvider(IConfigurationServiceProvider provider, IBus bus)
+        {
+            return bus.CreateServiceClient();
         }
     }
 }

@@ -1,15 +1,3 @@
-// Copyright 2007-2014 Chris Patterson, Dru Sellers, Travis Smith, et. al.
-//  
-// Licensed under the Apache License, Version 2.0 (the "License"); you may not use
-// this file except in compliance with the License. You may obtain a copy of the 
-// License at 
-// 
-//     http://www.apache.org/licenses/LICENSE-2.0 
-// 
-// Unless required by applicable law or agreed to in writing, software distributed
-// under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR 
-// CONDITIONS OF ANY KIND, either express or implied. See the License for the 
-// specific language governing permissions and limitations under the License.
 namespace MassTransit.Testing
 {
     using System;
@@ -18,20 +6,33 @@ namespace MassTransit.Testing
     using System.Linq.Expressions;
     using System.Threading.Tasks;
     using Saga;
+    using Util;
 
 
     public static class ExtensionMethodsForSagas
     {
-        public static async Task<Guid?> ShouldContainSaga<TSaga>(this ISagaRepository<TSaga> repository, Guid sagaId, TimeSpan timeout)
+        public static Task<Guid?> ShouldContainSaga<TSaga>(this ISagaRepository<TSaga> repository, Guid correlationId, TimeSpan timeout)
             where TSaga : class, ISaga
         {
-            DateTime giveUpAt = DateTime.Now + timeout;
+            if (repository is ILoadSagaRepository<TSaga> loadSagaRepository)
+                return loadSagaRepository.ShouldContainSaga(correlationId, timeout);
+
+            if (repository is IQuerySagaRepository<TSaga> querySagaRepository)
+                return querySagaRepository.ShouldContainSaga(correlationId, timeout);
+
+            return TaskUtil.Faulted<Guid?>(new ArgumentException("Does not support IQuerySagaRepository", nameof(repository)));
+        }
+
+        static async Task<Guid?> ShouldContainSaga<TSaga>(this ILoadSagaRepository<TSaga> repository, Guid correlationId, TimeSpan timeout)
+            where TSaga : class, ISaga
+        {
+            var giveUpAt = DateTime.Now + timeout;
 
             while (DateTime.Now < giveUpAt)
             {
-                Guid saga = (await (repository as IQuerySagaRepository<TSaga>).Where(x => x.CorrelationId == sagaId).ConfigureAwait(false)).FirstOrDefault();
-                if (saga != Guid.Empty)
-                    return saga;
+                var saga = await repository.Load(correlationId).ConfigureAwait(false);
+                if (saga != null)
+                    return saga.CorrelationId;
 
                 await Task.Delay(10).ConfigureAwait(false);
             }
@@ -39,15 +40,96 @@ namespace MassTransit.Testing
             return default;
         }
 
-        public static async Task<Guid?> ShouldNotContainSaga<TSaga>(this ISagaRepository<TSaga> repository, Guid sagaId, TimeSpan timeout)
+        static async Task<Guid?> ShouldContainSaga<TSaga>(this IQuerySagaRepository<TSaga> repository, Guid correlationId, TimeSpan timeout)
             where TSaga : class, ISaga
         {
-            DateTime giveUpAt = DateTime.Now + timeout;
+            var giveUpAt = DateTime.Now + timeout;
+
+            var query = new SagaQuery<TSaga>(x => x.CorrelationId == correlationId);
+
+            while (DateTime.Now < giveUpAt)
+            {
+                var instanceId = (await repository.Find(query).ConfigureAwait(false)).SingleOrDefault();
+                if (instanceId != Guid.Empty)
+                    return instanceId;
+
+                await Task.Delay(10).ConfigureAwait(false);
+            }
+
+            return default;
+        }
+
+        public static Task<Guid?> ShouldContainSaga<TSaga>(this ISagaRepository<TSaga> repository, Guid correlationId, Func<TSaga, bool> condition,
+            TimeSpan timeout)
+            where TSaga : class, ISaga
+        {
+            if (repository is ILoadSagaRepository<TSaga> loadSagaRepository)
+                return loadSagaRepository.ShouldContainSaga(correlationId, condition, timeout);
+
+            return TaskUtil.Faulted<Guid?>(new ArgumentException("Does not support IQuerySagaRepository", nameof(repository)));
+        }
+
+        static async Task<Guid?> ShouldContainSaga<TSaga>(this ILoadSagaRepository<TSaga> repository, Guid correlationId, Func<TSaga, bool> condition,
+            TimeSpan timeout)
+            where TSaga : class, ISaga
+        {
+            var giveUpAt = DateTime.Now + timeout;
+
+            while (DateTime.Now < giveUpAt)
+            {
+                var saga = await repository.Load(correlationId).ConfigureAwait(false);
+                if (saga != null && condition(saga))
+                    return saga.CorrelationId;
+
+                await Task.Delay(10).ConfigureAwait(false);
+            }
+
+            return default;
+        }
+
+        public static Task<Guid?> ShouldNotContainSaga<TSaga>(this ISagaRepository<TSaga> repository, Guid correlationId, TimeSpan timeout)
+            where TSaga : class, ISaga
+        {
+            if (repository is ILoadSagaRepository<TSaga> loadSagaRepository)
+                return loadSagaRepository.ShouldNotContainSaga(correlationId, timeout);
+
+            if (repository is IQuerySagaRepository<TSaga> querySagaRepository)
+                return querySagaRepository.ShouldNotContainSaga(correlationId, timeout);
+
+            return TaskUtil.Faulted<Guid?>(new ArgumentException("Does not support IQuerySagaRepository", nameof(repository)));
+        }
+
+        static async Task<Guid?> ShouldNotContainSaga<TSaga>(this ILoadSagaRepository<TSaga> repository, Guid correlationId, TimeSpan timeout)
+            where TSaga : class, ISaga
+        {
+            var giveUpAt = DateTime.Now + timeout;
+
+            var query = new SagaQuery<TSaga>(x => x.CorrelationId == correlationId);
+
+            TSaga instance = default;
+            while (DateTime.Now < giveUpAt)
+            {
+                instance = await repository.Load(correlationId).ConfigureAwait(false);
+                if (instance == null)
+                    return default;
+
+                await Task.Delay(10).ConfigureAwait(false);
+            }
+
+            return instance.CorrelationId;
+        }
+
+        static async Task<Guid?> ShouldNotContainSaga<TSaga>(this IQuerySagaRepository<TSaga> repository, Guid correlationId, TimeSpan timeout)
+            where TSaga : class, ISaga
+        {
+            var giveUpAt = DateTime.Now + timeout;
+
+            var query = new SagaQuery<TSaga>(x => x.CorrelationId == correlationId);
 
             Guid? saga = default;
             while (DateTime.Now < giveUpAt)
             {
-                saga = (await (repository as IQuerySagaRepository<TSaga>).Where(x => x.CorrelationId == sagaId).ConfigureAwait(false)).FirstOrDefault();
+                saga = (await repository.Find(query).ConfigureAwait(false)).FirstOrDefault();
                 if (saga == Guid.Empty)
                     return default;
 
@@ -57,17 +139,27 @@ namespace MassTransit.Testing
             return saga;
         }
 
-        public static async Task<Guid?> ShouldContainSaga<TSaga>(this ISagaRepository<TSaga> repository, Expression<Func<TSaga, bool>> filter,
+        public static Task<Guid?> ShouldContainSaga<TSaga>(this ISagaRepository<TSaga> repository, Expression<Func<TSaga, bool>> filter,
             TimeSpan timeout)
             where TSaga : class, ISaga
         {
-            DateTime giveUpAt = DateTime.Now + timeout;
+            if (repository is IQuerySagaRepository<TSaga> querySagaRepository)
+                return querySagaRepository.ShouldContainSaga(filter, timeout);
+
+            return TaskUtil.Faulted<Guid?>(new ArgumentException("Does not support IQuerySagaRepository", nameof(repository)));
+        }
+
+        static async Task<Guid?> ShouldContainSaga<TSaga>(this IQuerySagaRepository<TSaga> repository, Expression<Func<TSaga, bool>> filter,
+            TimeSpan timeout)
+            where TSaga : class, ISaga
+        {
+            var giveUpAt = DateTime.Now + timeout;
 
             var query = new SagaQuery<TSaga>(filter);
 
             while (DateTime.Now < giveUpAt)
             {
-                List<Guid> sagas = (await (repository as IQuerySagaRepository<TSaga>).Where(query.FilterExpression).ConfigureAwait(false)).ToList();
+                List<Guid> sagas = (await repository.Find(query).ConfigureAwait(false)).ToList();
                 if (sagas.Count > 0)
                     return sagas.Single();
 

@@ -1,61 +1,40 @@
-// Copyright 2007-2016 Chris Patterson, Dru Sellers, Travis Smith, et. al.
-//  
-// Licensed under the Apache License, Version 2.0 (the "License"); you may not use
-// this file except in compliance with the License. You may obtain a copy of the 
-// License at 
-// 
-//     http://www.apache.org/licenses/LICENSE-2.0 
-// 
-// Unless required by applicable law or agreed to in writing, software distributed
-// under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR 
-// CONDITIONS OF ANY KIND, either express or implied. See the License for the 
-// specific language governing permissions and limitations under the License.
 namespace MassTransit.Courier
 {
     using System;
     using System.Collections.Generic;
     using System.Linq;
     using System.Threading.Tasks;
+    using Contexts;
     using Contracts;
     using InternalMessages;
     using MassTransit.Serialization;
+    using Metadata;
     using Newtonsoft.Json;
     using Serialization;
-    using Util;
 
 
     public class RoutingSlipEventPublisher :
         IRoutingSlipEventPublisher
     {
+        static IDictionary<string, object> _emptyObject;
+        readonly CourierContext _context;
         readonly HostInfo _host;
         readonly IPublishEndpoint _publishEndpoint;
         readonly RoutingSlip _routingSlip;
         readonly ISendEndpointProvider _sendEndpointProvider;
-        readonly string _activityName;
 
         static RoutingSlipEventPublisher()
         {
             RoutingSlipEventCorrelation.ConfigureCorrelationIds();
         }
 
-        public RoutingSlipEventPublisher(CompensateContext compensateContext, RoutingSlip routingSlip)
-            : this(compensateContext, compensateContext, routingSlip)
+        public RoutingSlipEventPublisher(CourierContext context, RoutingSlip routingSlip)
         {
-            _sendEndpointProvider = compensateContext;
-            _publishEndpoint = compensateContext;
+            _sendEndpointProvider = context;
+            _publishEndpoint = context;
             _routingSlip = routingSlip;
-            _activityName = compensateContext.ActivityName;
-            _host = compensateContext.Host;
-        }
-
-        public RoutingSlipEventPublisher(ExecuteContext executeContext, RoutingSlip routingSlip)
-            : this(executeContext, executeContext, routingSlip)
-        {
-            _sendEndpointProvider = executeContext;
-            _publishEndpoint = executeContext;
-            _routingSlip = routingSlip;
-            _activityName = executeContext.ActivityName;
-            _host = executeContext.Host;
+            _host = context.Host;
+            _context = context;
         }
 
         public RoutingSlipEventPublisher(ISendEndpointProvider sendEndpointProvider, IPublishEndpoint publishEndpoint, RoutingSlip routingSlip)
@@ -66,6 +45,8 @@ namespace MassTransit.Courier
             _host = HostMetadataCache.Host;
         }
 
+        static IDictionary<string, object> EmptyObject => _emptyObject ??= JsonConvert.DeserializeObject<IDictionary<string, object>>("{}");
+
         public Task PublishRoutingSlipCompleted(DateTime timestamp, TimeSpan duration, IDictionary<string, object> variables)
         {
             return PublishEvent<RoutingSlipCompleted>(RoutingSlipEvents.Completed, contents => new RoutingSlipCompletedMessage(
@@ -74,8 +55,8 @@ namespace MassTransit.Courier
                 duration,
                 contents == RoutingSlipEventContents.All || contents.HasFlag(RoutingSlipEventContents.Variables)
                     ? variables
-                    : GetEmptyObject()
-                ));
+                    : EmptyObject
+            ));
         }
 
         public Task PublishRoutingSlipFaulted(DateTime timestamp, TimeSpan duration, IDictionary<string, object> variables,
@@ -88,8 +69,8 @@ namespace MassTransit.Courier
                 exceptions,
                 contents == RoutingSlipEventContents.All || contents.HasFlag(RoutingSlipEventContents.Variables)
                     ? variables
-                    : GetEmptyObject()
-                ));
+                    : EmptyObject
+            ));
         }
 
         public Task PublishRoutingSlipActivityCompleted(string activityName, Guid executionId,
@@ -105,13 +86,13 @@ namespace MassTransit.Courier
                 duration,
                 contents == RoutingSlipEventContents.All || contents.HasFlag(RoutingSlipEventContents.Variables)
                     ? variables
-                    : GetEmptyObject(),
+                    : EmptyObject,
                 contents == RoutingSlipEventContents.All || contents.HasFlag(RoutingSlipEventContents.Arguments)
                     ? arguments
-                    : GetEmptyObject(),
+                    : EmptyObject,
                 contents == RoutingSlipEventContents.All || contents.HasFlag(RoutingSlipEventContents.Data)
                     ? data
-                    : GetEmptyObject()));
+                    : EmptyObject));
         }
 
         public Task PublishRoutingSlipActivityFaulted(string activityName, Guid executionId, DateTime timestamp, TimeSpan duration, ExceptionInfo exceptionInfo,
@@ -127,10 +108,10 @@ namespace MassTransit.Courier
                 exceptionInfo,
                 contents == RoutingSlipEventContents.All || contents.HasFlag(RoutingSlipEventContents.Variables)
                     ? variables
-                    : GetEmptyObject(),
+                    : EmptyObject,
                 contents == RoutingSlipEventContents.All || contents.HasFlag(RoutingSlipEventContents.Arguments)
                     ? arguments
-                    : GetEmptyObject()));
+                    : EmptyObject));
         }
 
         public Task PublishRoutingSlipActivityCompensated(string activityName, Guid executionId, DateTime timestamp, TimeSpan duration,
@@ -145,10 +126,10 @@ namespace MassTransit.Courier
                 duration,
                 contents == RoutingSlipEventContents.All || contents.HasFlag(RoutingSlipEventContents.Variables)
                     ? variables
-                    : GetEmptyObject(),
+                    : EmptyObject,
                 contents == RoutingSlipEventContents.All || contents.HasFlag(RoutingSlipEventContents.Arguments)
                     ? data
-                    : GetEmptyObject()));
+                    : EmptyObject));
         }
 
         public Task PublishRoutingSlipRevised(string activityName, Guid executionId, DateTime timestamp, TimeSpan duration,
@@ -164,7 +145,7 @@ namespace MassTransit.Courier
                 duration,
                 contents == RoutingSlipEventContents.All || contents.HasFlag(RoutingSlipEventContents.Variables)
                     ? variables
-                    : GetEmptyObject(),
+                    : EmptyObject,
                 contents == RoutingSlipEventContents.All || contents.HasFlag(RoutingSlipEventContents.Itinerary)
                     ? itinerary
                     : Enumerable.Empty<Activity>(),
@@ -186,7 +167,7 @@ namespace MassTransit.Courier
                 duration,
                 contents == RoutingSlipEventContents.All || contents.HasFlag(RoutingSlipEventContents.Variables)
                     ? variables
-                    : GetEmptyObject(),
+                    : EmptyObject,
                 contents == RoutingSlipEventContents.All || contents.HasFlag(RoutingSlipEventContents.Itinerary)
                     ? previousItinerary
                     : Enumerable.Empty<Activity>()));
@@ -196,41 +177,44 @@ namespace MassTransit.Courier
             DateTime timestamp, TimeSpan duration, DateTime failureTimestamp, TimeSpan routingSlipDuration,
             ExceptionInfo exceptionInfo, IDictionary<string, object> variables, IDictionary<string, object> data)
         {
-            return PublishEvent(RoutingSlipEvents.ActivityCompensationFailed | RoutingSlipEvents.CompensationFailed, contents => new CompensationFailed(
-                _host,
-                _routingSlip.TrackingNumber,
-                activityName,
-                executionId,
-                timestamp,
-                duration,
-                failureTimestamp,
-                routingSlipDuration,
-                exceptionInfo,
-                contents == RoutingSlipEventContents.All || contents.HasFlag(RoutingSlipEventContents.Variables)
-                    ? variables
-                    : GetEmptyObject(),
-                contents == RoutingSlipEventContents.All || contents.HasFlag(RoutingSlipEventContents.Data)
-                    ? data
-                    : GetEmptyObject()));
-        }
+            var activityTask = PublishEvent<RoutingSlipActivityCompensationFailed>(RoutingSlipEvents.ActivityCompensationFailed,
+                contents => new ActivityCompensationFailed(
+                    _host,
+                    _routingSlip.TrackingNumber,
+                    activityName,
+                    executionId,
+                    timestamp,
+                    duration,
+                    exceptionInfo,
+                    contents == RoutingSlipEventContents.All || contents.HasFlag(RoutingSlipEventContents.Variables)
+                        ? variables
+                        : EmptyObject,
+                    contents == RoutingSlipEventContents.All || contents.HasFlag(RoutingSlipEventContents.Data)
+                        ? data
+                        : EmptyObject));
 
-        static IDictionary<string, object> GetEmptyObject()
-        {
-            return JsonConvert.DeserializeObject<IDictionary<string, object>>("{}");
+            var slipTask = PublishEvent<RoutingSlipCompensationFailed>(RoutingSlipEvents.CompensationFailed,
+                contents => new CompensationFailed(
+                    _host,
+                    _routingSlip.TrackingNumber,
+                    failureTimestamp,
+                    routingSlipDuration,
+                    exceptionInfo,
+                    contents == RoutingSlipEventContents.All || contents.HasFlag(RoutingSlipEventContents.Variables)
+                        ? variables
+                        : EmptyObject));
+
+            return Task.WhenAll(activityTask, slipTask);
         }
 
         async Task PublishEvent<T>(RoutingSlipEvents eventFlag, Func<RoutingSlipEventContents, T> messageFactory)
             where T : class
         {
             foreach (var subscription in _routingSlip.Subscriptions)
-            {
                 await PublishSubscriptionEvent(eventFlag, messageFactory, subscription).ConfigureAwait(false);
-            }
 
             if (_routingSlip.Subscriptions.All(sub => sub.Events.HasFlag(RoutingSlipEvents.Supplemental)))
-            {
                 await _publishEndpoint.Publish(messageFactory(RoutingSlipEventContents.All)).ConfigureAwait(false);
-            }
         }
 
         async Task PublishSubscriptionEvent<T>(RoutingSlipEvents eventFlag, Func<RoutingSlipEventContents, T> messageFactory, Subscription subscription)
@@ -238,21 +222,22 @@ namespace MassTransit.Courier
         {
             if ((subscription.Events & RoutingSlipEvents.EventMask) == RoutingSlipEvents.All || subscription.Events.HasFlag(eventFlag))
             {
-                if (string.IsNullOrWhiteSpace(_activityName) || string.IsNullOrWhiteSpace(subscription.ActivityName)
-                    || _activityName.Equals(subscription.ActivityName, StringComparison.OrdinalIgnoreCase))
+                var activityName = _context?.ActivityName;
+                if (string.IsNullOrWhiteSpace(activityName) || string.IsNullOrWhiteSpace(subscription.ActivityName)
+                    || activityName.Equals(subscription.ActivityName, StringComparison.OrdinalIgnoreCase))
                 {
-                var endpoint = await _sendEndpointProvider.GetSendEndpoint(subscription.Address).ConfigureAwait(false);
+                    var endpoint = await _sendEndpointProvider.GetSendEndpoint(subscription.Address).ConfigureAwait(false);
 
-                var message = messageFactory(subscription.Include);
+                    var message = messageFactory(subscription.Include);
 
-                if (subscription.Message != null)
-                {
-                    var adapter = new MessageEnvelopeContextAdapter(null, subscription.Message, JsonMessageSerializer.ContentTypeHeaderValue, message);
+                    if (subscription.Message != null)
+                    {
+                        var adapter = new MessageEnvelopeContextAdapter(null, subscription.Message, JsonMessageSerializer.ContentTypeHeaderValue, message);
 
-                    await endpoint.Send(message, adapter).ConfigureAwait(false);
-                }
-                else
-                    await endpoint.Send(message).ConfigureAwait(false);
+                        await endpoint.Send(message, adapter).ConfigureAwait(false);
+                    }
+                    else
+                        await endpoint.Send(message).ConfigureAwait(false);
                 }
             }
         }

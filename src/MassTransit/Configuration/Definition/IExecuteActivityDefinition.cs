@@ -4,7 +4,8 @@ namespace MassTransit.Definition
     using Courier;
 
 
-    public interface IExecuteActivityDefinition
+    public interface IExecuteActivityDefinition :
+        IDefinition
     {
         /// <summary>
         /// The Activity type
@@ -15,6 +16,8 @@ namespace MassTransit.Definition
         /// The argument type
         /// </summary>
         Type ArgumentType { get; }
+
+        IEndpointDefinition ExecuteEndpointDefinition { get; }
 
         /// <summary>
         /// Return the endpoint name for the execute activity
@@ -27,9 +30,14 @@ namespace MassTransit.Definition
 
     public interface IExecuteActivityDefinition<TActivity, TArguments> :
         IExecuteActivityDefinition
-        where TActivity : class, ExecuteActivity<TArguments>
+        where TActivity : class, IExecuteActivity<TArguments>
         where TArguments : class
     {
+        /// <summary>
+        /// Sets the endpoint definition, if available
+        /// </summary>
+        new IEndpointDefinition<IExecuteActivity<TArguments>> ExecuteEndpointDefinition { set; }
+
         /// <summary>
         /// Configure the execute activity
         /// </summary>

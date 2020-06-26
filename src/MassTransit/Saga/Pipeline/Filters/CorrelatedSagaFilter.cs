@@ -1,22 +1,12 @@
-// Copyright 2007-2015 Chris Patterson, Dru Sellers, Travis Smith, et. al.
-//  
-// Licensed under the Apache License, Version 2.0 (the "License"); you may not use
-// this file except in compliance with the License. You may obtain a copy of the 
-// License at 
-// 
-//     http://www.apache.org/licenses/LICENSE-2.0 
-// 
-// Unless required by applicable law or agreed to in writing, software distributed
-// under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR 
-// CONDITIONS OF ANY KIND, either express or implied. See the License for the 
-// specific language governing permissions and limitations under the License.
 namespace MassTransit.Saga.Pipeline.Filters
 {
     using System;
     using System.Diagnostics;
     using System.Threading.Tasks;
+    using Context;
     using GreenPipes;
-    using Util;
+    using Logging;
+    using Metadata;
 
 
     /// <summary>
@@ -43,34 +33,45 @@ namespace MassTransit.Saga.Pipeline.Filters
 
         void IProbeSite.Probe(ProbeContext context)
         {
-            ProbeContext scope = context.CreateFilterScope("saga");
-            scope.Set(new
-            {
-                Correlation = "Id"
-            });
+            var scope = context.CreateFilterScope("saga");
+            scope.Set(new {Correlation = "Id"});
 
-             _sagaRepository.Probe(scope);
+            _sagaRepository.Probe(scope);
 
-             _messagePipe.Probe(scope);
+            _messagePipe.Probe(scope);
         }
 
         async Task IFilter<ConsumeContext<TMessage>>.Send(ConsumeContext<TMessage> context, IPipe<ConsumeContext<TMessage>> next)
         {
-            Stopwatch timer = Stopwatch.StartNew();
+            StartedActivity? activity = LogContext.IfEnabled(OperationName.Saga.Send)?.StartSagaActivity<TSaga, TMessage>(context);
+
+            var timer = Stopwatch.StartNew();
             try
             {
                 await Task.Yield();
-
                 await _sagaRepository.Send(context, _policy, _messagePipe).ConfigureAwait(false);
 
                 await next.Send(context).ConfigureAwait(false);
 
                 await context.NotifyConsumed(timer.Elapsed, TypeMetadataCache<TSaga>.ShortName).ConfigureAwait(false);
             }
+            catch (OperationCanceledException exception)
+            {
+                await context.NotifyFaulted(timer.Elapsed, TypeMetadataCache<TSaga>.ShortName, exception).ConfigureAwait(false);
+
+                if (exception.CancellationToken == context.CancellationToken)
+                    throw;
+
+                throw new ConsumerCanceledException($"The operation was canceled by the consumer: {TypeMetadataCache<TSaga>.ShortName}");
+            }
             catch (Exception ex)
             {
                 await context.NotifyFaulted(timer.Elapsed, TypeMetadataCache<TSaga>.ShortName, ex).ConfigureAwait(false);
                 throw;
+            }
+            finally
+            {
+                activity?.Stop();
             }
         }
     }

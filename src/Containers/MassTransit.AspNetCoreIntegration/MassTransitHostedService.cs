@@ -2,42 +2,34 @@ namespace MassTransit.AspNetCoreIntegration
 {
     using System.Threading;
     using System.Threading.Tasks;
-    using HealthChecks;
-    using Logging.Tracing;
     using Microsoft.Extensions.Hosting;
-    using Microsoft.Extensions.Logging;
+    using Registration;
+    using Util;
 
 
     public class MassTransitHostedService :
         IHostedService
     {
-        readonly IBusControl _bus;
-        readonly SimplifiedBusHealthCheck _simplifiedBusCheck;
-        readonly ReceiveEndpointHealthCheck _receiveEndpointCheck;
+        readonly IBusDepot _depot;
+        Task _startTask;
 
-        public MassTransitHostedService(IBusControl bus, ILoggerFactory loggerFactory, SimplifiedBusHealthCheck simplifiedBusCheck,
-            ReceiveEndpointHealthCheck receiveEndpointCheck)
+        public MassTransitHostedService(IBusDepot depot)
         {
-            _bus = bus;
-            _simplifiedBusCheck = simplifiedBusCheck;
-            _receiveEndpointCheck = receiveEndpointCheck;
-
-            if (loggerFactory != null && Logging.Logger.Current.GetType() == typeof(TraceLogger))
-                ExtensionsLoggingIntegration.ExtensionsLogger.Use(loggerFactory);
+            _depot = depot;
         }
 
-        public async Task StartAsync(CancellationToken cancellationToken)
+        public Task StartAsync(CancellationToken cancellationToken)
         {
-            _bus.ConnectReceiveEndpointObserver(_receiveEndpointCheck);
+            _startTask = _depot.Start(cancellationToken);
 
-            await _bus.StartAsync(cancellationToken).ConfigureAwait(false);
-
-            _simplifiedBusCheck.ReportBusStarted();
+            return _startTask.IsCompleted
+                ? _startTask
+                : TaskUtil.Completed;
         }
 
         public Task StopAsync(CancellationToken cancellationToken)
         {
-            return _bus.StopAsync(cancellationToken);
+            return _depot.Stop(cancellationToken);
         }
     }
 }

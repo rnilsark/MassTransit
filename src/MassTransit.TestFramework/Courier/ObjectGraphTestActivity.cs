@@ -1,16 +1,4 @@
-﻿// Copyright 2007-2013 Chris Patterson
-//  
-// Licensed under the Apache License, Version 2.0 (the "License"); you may not use
-// this file except in compliance with the License. You may obtain a copy of the 
-// License at 
-// 
-//     http://www.apache.org/licenses/LICENSE-2.0 
-// 
-// Unless required by applicable law or agreed to in writing, software distributed
-// under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR 
-// CONDITIONS OF ANY KIND, either express or implied. See the License for the 
-// specific language governing permissions and limitations under the License.
-namespace MassTransit.TestFramework.Courier
+﻿namespace MassTransit.TestFramework.Courier
 {
     using System;
     using System.Collections.Generic;
@@ -20,13 +8,13 @@ namespace MassTransit.TestFramework.Courier
 
 
     public class ObjectGraphTestActivity :
-        Activity<ObjectGraphActivityArguments, TestLog>
+        IActivity<ObjectGraphActivityArguments, TestLog>
     {
+        readonly IDictionary<string, string> _argumentsDictionary;
         readonly decimal _decimalValue;
         readonly int _intValue;
         readonly string[] _names;
         readonly string _stringValue;
-        readonly IDictionary<string, string> _argumentsDictionary;
 
         public ObjectGraphTestActivity(int intValue, string stringValue, decimal decimalValue, string[] names, IDictionary<string, string> argumentsDictionary)
         {
@@ -36,16 +24,17 @@ namespace MassTransit.TestFramework.Courier
             _names = names;
             _argumentsDictionary = argumentsDictionary;
         }
+
         public async Task<ExecutionResult> Execute(ExecuteContext<ObjectGraphActivityArguments> context)
         {
-            int intValue = context.Arguments.Outer.IntValue;
-            string stringValue = context.Arguments.Outer.StringValue;
-            decimal decimalValue = context.Arguments.Outer.DecimalValue;
+            var intValue = context.Arguments.Outer.IntValue;
+            var stringValue = context.Arguments.Outer.StringValue;
+            var decimalValue = context.Arguments.Outer.DecimalValue;
             string[] names = context.Arguments.Names;
             IDictionary<string, string> argumentsDictionary = context.Arguments.ArgumentsDictionary;
 
             Console.WriteLine("TestActivity: Execute: {0}, {1}, {2}, [{3}],[{4}]", intValue, stringValue, decimalValue,
-                          string.Join(",", names), string.Join(",", argumentsDictionary.Select(x => $"{x.Key} => {x.Value}")));
+                string.Join(",", names), string.Join(",", argumentsDictionary.Select(x => $"{x.Key} => {x.Value}")));
 
             if (_intValue != intValue)
                 throw new ArgumentException("intValue");

@@ -34,10 +34,8 @@ packages
 # Tests
 TestResult.xml
 submit.xml
-tests/*
 SolutionVersion.cs
 src/SolutionVersion.cs
-tests
 doc/build/*
 *.[lm]df
 *.runsettings
@@ -48,6 +46,7 @@ doc/build/*
 /src/MassTransit.SimpleInjectorIntegration/MassTransit.SimpleInjectorIntegration.csproj.nuspec
 *.DS_Store
 
+docs/.vuepress/dist
 _book
 /node_modules
 .vscode
@@ -63,3 +62,4 @@ tools/**
 # Artifacts
 artifacts/**
 artifacts_old/**
+/src/.ionide

@@ -1,9 +1,8 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
-  <Import Project="../netfx.props" />
-  <Import Project="../signing.props" />
+  <Import Project="../../signing.props" />
 
   <PropertyGroup>
-    <TargetFrameworks>net452;netstandard2.0</TargetFrameworks>
+    <TargetFramework>netstandard2.0</TargetFramework>
   </PropertyGroup>
 
   <PropertyGroup>
@@ -11,47 +10,21 @@
     <Description>$(Description)</Description>
   </PropertyGroup>
 
-  <PropertyGroup Condition=" '$(TargetFramework)' == 'netstandard2.0' ">
-    <DefineConstants>$(DefineConstants);NETCORE</DefineConstants>
-  </PropertyGroup>
-
-  <ItemGroup Condition="'$(TargetFramework)'=='netstandard2.0'">
-        <Compile Remove="Util/NHProfIntegration.cs" />
-        <Compile Remove="Configuration/BusConfigurators/PerformanceCounterBusFactorySpecification.cs" />
-        <Compile Remove="Serialization/StaticHeaders.cs" />
-        <Compile Remove="Serialization/StaticConsumeContext.cs" />
-        <Compile Remove="Serialization/ExtensionsForBinaryMessageSerializer.cs" />
-        <Compile Remove="Serialization/BinaryMessageSerializer.cs" />
-        <Compile Remove="Serialization/BinaryMessageDeserializer.cs" />
-        <Compile Remove="Monitoring/Performance/**" />
-        <Compile Remove="Configuration/PerformanceCounterExtensions.cs" />
-  </ItemGroup>
-
   <ItemGroup>
-        <PackageReference Include="GreenPipes" Version="2.1.4" />
-        <PackageReference Include="NewId" Version="3.0.1" />
-        <PackageReference Include="Newtonsoft.Json" Version="11.0.2" />
-        <PackageReference Include="Newtonsoft.Json.Bson" Version="1.0.1" />
-        <PackageReference Include="System.Reflection.Emit.Lightweight" Version="4.3.0" />
-        <PackageReference Include="Microsoft.SourceLink.GitHub" Version="1.0.0-*" PrivateAssets="All" />
-        <PackageReference Include="System.ValueTuple" Version="4.5.0" />
-  </ItemGroup>
-
-  <ItemGroup Condition="'$(TargetFramework)' == 'netstandard2.0' ">
-        <PackageReference Include="System.Reflection.Emit" Version="4.3.0" />
-        <PackageReference Include="System.Reflection.Extensions" Version="4.3.0" />
-        <PackageReference Include="System.Diagnostics.TraceSource" Version="4.3.0" />
-        <PackageReference Include="System.Xml.ReaderWriter" Version="4.3.0" />
-        <PackageReference Include="System.Threading.ThreadPool" Version="4.3.0" />
-        <PackageReference Include="System.Diagnostics.DiagnosticSource" Version="4.5.1" />
-        <PackageReference Include="System.Runtime.Loader" Version="4.3.0" />
-  </ItemGroup>
-
-  <ItemGroup Condition=" '$(TargetFramework)' == 'net452' ">
-        <Reference Include="System.Transactions" />
-  </ItemGroup>
-
-  <ItemGroup>
-        <Folder Include="Monitoring\Performance\Configuration" />
+    <PackageReference Include="Automatonymous" Version="5.0.0-develop.135" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="3.1.5" />
+    <PackageReference Include="NewId" Version="3.0.2" />
+    <PackageReference Include="Newtonsoft.Json" Version="11.0.2" />
+    <PackageReference Include="Newtonsoft.Json.Bson" Version="1.0.1" />
+    <PackageReference Include="System.Diagnostics.DiagnosticSource" Version="4.7.1" />
+    <PackageReference Include="System.Reflection.Emit.Lightweight" Version="4.7.0" />
+    <PackageReference Include="Microsoft.SourceLink.GitHub" Version="1.0.0" PrivateAssets="All" />
+    <PackageReference Include="System.Threading.Channels" Version="4.7.1" />
+    <PackageReference Include="System.ValueTuple" Version="4.5.0" />
+    <PackageReference Include="System.Reflection.Emit" Version="4.7.0" />
+    <PackageReference Include="System.Reflection.Extensions" Version="4.3.0" />
+    <PackageReference Include="System.Xml.ReaderWriter" Version="4.3.1" />
+    <PackageReference Include="System.Threading.ThreadPool" Version="4.3.0" />
+    <PackageReference Include="System.Runtime.Loader" Version="4.3.0" />
   </ItemGroup>
 </Project>

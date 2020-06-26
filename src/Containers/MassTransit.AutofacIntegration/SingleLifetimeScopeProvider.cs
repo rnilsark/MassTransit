@@ -1,16 +1,4 @@
-﻿// Copyright 2007-2017 Chris Patterson, Dru Sellers, Travis Smith, et. al.
-//  
-// Licensed under the Apache License, Version 2.0 (the "License"); you may not use
-// this file except in compliance with the License. You may obtain a copy of the 
-// License at 
-// 
-//     http://www.apache.org/licenses/LICENSE-2.0 
-// 
-// Unless required by applicable law or agreed to in writing, software distributed
-// under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR 
-// CONDITIONS OF ANY KIND, either express or implied. See the License for the 
-// specific language governing permissions and limitations under the License.
-namespace MassTransit.AutofacIntegration
+﻿namespace MassTransit.AutofacIntegration
 {
     using Autofac;
 
@@ -18,23 +6,33 @@ namespace MassTransit.AutofacIntegration
     public class SingleLifetimeScopeProvider :
         ILifetimeScopeProvider
     {
-        readonly ILifetimeScope _scope;
-
-        public SingleLifetimeScopeProvider(ILifetimeScope scope)
+        public SingleLifetimeScopeProvider(ILifetimeScope lifetimeScope)
         {
-            _scope = scope;
+            LifetimeScope = lifetimeScope;
         }
 
-        public ILifetimeScope LifetimeScope => _scope;
+        public ILifetimeScope LifetimeScope { get; }
+
+        public ILifetimeScope GetLifetimeScope<T>(SendContext<T> context)
+            where T : class
+        {
+            return LifetimeScope;
+        }
+
+        public ILifetimeScope GetLifetimeScope<T>(PublishContext<T> context)
+            where T : class
+        {
+            return LifetimeScope;
+        }
 
         public ILifetimeScope GetLifetimeScope(ConsumeContext context)
         {
-            return _scope;
+            return LifetimeScope;
         }
 
         ILifetimeScope ILifetimeScopeProvider.GetLifetimeScope<T>(ConsumeContext<T> context)
         {
-            return _scope;
+            return LifetimeScope;
         }
     }
 }

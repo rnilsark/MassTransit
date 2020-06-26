@@ -1,78 +1,135 @@
-﻿// Copyright 2007-2014 Chris Patterson, Dru Sellers, Travis Smith, et. al.
-//  
-// Licensed under the Apache License, Version 2.0 (the "License"); you may not use
-// this file except in compliance with the License. You may obtain a copy of the 
-// License at 
-// 
-//     http://www.apache.org/licenses/LICENSE-2.0 
-// 
-// Unless required by applicable law or agreed to in writing, software distributed
-// under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR 
-// CONDITIONS OF ANY KIND, either express or implied. See the License for the 
-// specific language governing permissions and limitations under the License.
-namespace MassTransit.Testing.MessageObservers
+﻿namespace MassTransit.Testing.MessageObservers
 {
     using System;
     using System.Collections.Generic;
     using System.Linq;
-    using System.Reflection;
+    using System.Threading;
+    using System.Threading.Tasks;
+
 
     public class ReceivedMessageList :
-        MessageList<IReceivedMessage>,
+        AsyncElementList<IReceivedMessage>,
         IReceivedMessageList
     {
-        public ReceivedMessageList(TimeSpan timeout)
-            : base((int)timeout.TotalMilliseconds)
+        public ReceivedMessageList(TimeSpan timeout, CancellationToken testCompleted = default)
+            : base(timeout, testCompleted)
         {
         }
 
-        public IEnumerable<IReceivedMessage<T>> Select<T>()
+        public IEnumerable<IReceivedMessage<T>> Select<T>(CancellationToken cancellationToken = default)
             where T : class
         {
-            return Select(x => typeof(T).IsAssignableFrom(x.MessageType))
-                .Cast<IReceivedMessage<T>>();
+            return Select(x => x is IReceivedMessage<T>, cancellationToken).Cast<IReceivedMessage<T>>();
         }
 
-        public IEnumerable<IReceivedMessage<T>> Select<T>(Func<IReceivedMessage<T>, bool> filter)
+        public IEnumerable<IReceivedMessage<T>> Select<T>(FilterDelegate<IReceivedMessage<T>> filter, CancellationToken cancellationToken = default)
             where T : class
         {
-            return Select(x => typeof(T).IsAssignableFrom(x.MessageType))
-                .Cast<IReceivedMessage<T>>()
-                .Where(filter);
+            var messageFilter = new ReceivedMessageFilter();
+            messageFilter.Includes.Add(filter);
+
+            return Select(message => messageFilter.Any(message), cancellationToken).Cast<IReceivedMessage<T>>();
+        }
+
+        public IAsyncEnumerable<IReceivedMessage> SelectAsync(Action<ReceivedMessageFilter> apply, CancellationToken cancellationToken = default)
+        {
+            var messageFilter = new ReceivedMessageFilter();
+            apply?.Invoke(messageFilter);
+
+            return SelectAsync(message => messageFilter.Any(message), cancellationToken);
+        }
+
+        public IAsyncEnumerable<IReceivedMessage<T>> SelectAsync<T>(CancellationToken cancellationToken = default)
+            where T : class
+        {
+            var messageFilter = new ReceivedMessageFilter();
+            messageFilter.Includes.Add<T>();
+
+            return SelectAsync(message => messageFilter.Any(message), cancellationToken).Select<IReceivedMessage, IReceivedMessage<T>>();
+        }
+
+        public IAsyncEnumerable<IReceivedMessage<T>> SelectAsync<T>(FilterDelegate<IReceivedMessage<T>> filter, CancellationToken cancellationToken = default)
+            where T : class
+        {
+            var messageFilter = new ReceivedMessageFilter();
+            messageFilter.Includes.Add(filter);
+
+            return SelectAsync(message => messageFilter.Any(message), cancellationToken).Select<IReceivedMessage, IReceivedMessage<T>>();
+        }
+
+        public Task<bool> Any(Action<ReceivedMessageFilter> apply = default, CancellationToken cancellationToken = default)
+        {
+            var messageFilter = new ReceivedMessageFilter();
+            apply?.Invoke(messageFilter);
+
+            return Any(message => messageFilter.Any(message), cancellationToken);
+        }
+
+        public Task<bool> Any<T>(CancellationToken cancellationToken = default)
+            where T : class
+        {
+            var messageFilter = new ReceivedMessageFilter();
+            messageFilter.Includes.Add<T>();
+
+            return Any(message => messageFilter.Any(message), cancellationToken);
+        }
+
+        public Task<bool> Any<T>(FilterDelegate<IReceivedMessage<T>> filter, CancellationToken cancellationToken = default)
+            where T : class
+        {
+            var messageFilter = new ReceivedMessageFilter();
+            messageFilter.Includes.Add(filter);
+
+            return Any(message => messageFilter.Any(message), cancellationToken);
         }
 
         public void Add<T>(ConsumeContext<T> context)
             where T : class
         {
-            Add(new ReceivedMessage<T>(context), context.MessageId);
+            Add(new ReceivedMessage<T>(context));
         }
 
         public void Add<T>(ConsumeContext<T> context, Exception exception)
             where T : class
         {
-            Add(new ReceivedMessage<T>(context, exception), context.MessageId);
+            Add(new ReceivedMessage<T>(context, exception));
         }
     }
 
 
     public class ReceivedMessageList<T> :
-        MessageList<IReceivedMessage<T>>,
+        AsyncElementList<IReceivedMessage<T>>,
         IReceivedMessageList<T>
         where T : class
     {
-        public ReceivedMessageList(TimeSpan timeout)
-            : base((int)timeout.TotalMilliseconds)
+        public ReceivedMessageList(TimeSpan timeout, CancellationToken testCompleted = default)
+            : base(timeout, testCompleted)
         {
+        }
+
+        public IEnumerable<IReceivedMessage<T>> Select(CancellationToken cancellationToken = default)
+        {
+            return Select(x => true, cancellationToken);
+        }
+
+        public IAsyncEnumerable<IReceivedMessage<T>> SelectAsync(CancellationToken cancellationToken = default)
+        {
+            return SelectAsync(x => true, cancellationToken);
+        }
+
+        public Task<bool> Any(CancellationToken cancellationToken = default)
+        {
+            return Any(x => true, cancellationToken);
         }
 
         public void Add(ConsumeContext<T> context)
         {
-            Add(new ReceivedMessage<T>(context), context.MessageId);
+            Add(new ReceivedMessage<T>(context));
         }
 
         public void Add(ConsumeContext<T> context, Exception exception)
         {
-            Add(new ReceivedMessage<T>(context, exception), context.MessageId);
+            Add(new ReceivedMessage<T>(context, exception));
         }
     }
 }

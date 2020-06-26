@@ -1,20 +1,10 @@
-﻿// Copyright 2007-2016 Chris Patterson, Dru Sellers, Travis Smith, et. al.
-//  
-// Licensed under the Apache License, Version 2.0 (the "License"); you may not use
-// this file except in compliance with the License. You may obtain a copy of the 
-// License at 
-// 
-//     http://www.apache.org/licenses/LICENSE-2.0 
-// 
-// Unless required by applicable law or agreed to in writing, software distributed
-// under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR 
-// CONDITIONS OF ANY KIND, either express or implied. See the License for the 
-// specific language governing permissions and limitations under the License.
-namespace MassTransit
+﻿namespace MassTransit
 {
     using System;
     using GreenPipes;
     using PipeConfigurators;
+    using Registration;
+    using Scheduling;
 
 
     public static class MessageSchedulerExtensions
@@ -35,7 +25,7 @@ namespace MassTransit
         }
 
         /// <summary>
-        /// Uses Publish (instead of Send) to schedule messages via the Quartz message scheduler. For this to work, a single 
+        /// Uses Publish (instead of Send) to schedule messages via the Quartz message scheduler. For this to work, a single
         /// queue should be used to schedule all messages. If multiple instances are running, they should be on the same Quartz
         /// cluster.
         /// </summary>
@@ -48,6 +38,57 @@ namespace MassTransit
             var pipeBuilderConfigurator = new PublishMessageSchedulerPipeSpecification();
 
             configurator.AddPipeSpecification(pipeBuilderConfigurator);
+        }
+
+        /// <summary>
+        /// Add a <see cref="IMessageScheduler" /> to the container that sends <see cref="ScheduleMessage{T}" />
+        /// to an external message scheduler on the specified endpoint address, such as Quartz or Hangfire.
+        /// </summary>
+        /// <param name="configurator"></param>
+        /// <param name="schedulerEndpointAddress">The endpoint address where the scheduler is running</param>
+        public static void AddMessageScheduler(this IRegistrationConfigurator configurator, Uri schedulerEndpointAddress)
+        {
+            if (schedulerEndpointAddress == null)
+                throw new ArgumentNullException(nameof(schedulerEndpointAddress));
+
+            configurator.AddMessageScheduler(new EndpointMessageSchedulerRegistration(schedulerEndpointAddress));
+        }
+
+        /// <summary>
+        /// Add a <see cref="IMessageScheduler" /> to the container that publishes <see cref="ScheduleMessage{T}" />
+        /// to an external message scheduler, such as Quartz or Hangfire.
+        /// </summary>
+        /// <param name="configurator"></param>
+        public static void AddPublishMessageScheduler(this IRegistrationConfigurator configurator)
+        {
+            configurator.AddMessageScheduler(new PublishEndpointMessageSchedulerRegistration());
+        }
+
+
+        class EndpointMessageSchedulerRegistration :
+            IMessageSchedulerRegistration
+        {
+            readonly Uri _schedulerEndpointAddress;
+
+            public EndpointMessageSchedulerRegistration(Uri schedulerEndpointAddress)
+            {
+                _schedulerEndpointAddress = schedulerEndpointAddress;
+            }
+
+            public void Register(IContainerRegistrar registrar)
+            {
+                registrar.RegisterSingleInstance(provider => provider.GetRequiredService<IBus>().CreateMessageScheduler(_schedulerEndpointAddress));
+            }
+        }
+
+
+        class PublishEndpointMessageSchedulerRegistration :
+            IMessageSchedulerRegistration
+        {
+            public void Register(IContainerRegistrar registrar)
+            {
+                registrar.RegisterSingleInstance(provider => provider.GetRequiredService<IBus>().CreateMessageScheduler());
+            }
         }
     }
 }

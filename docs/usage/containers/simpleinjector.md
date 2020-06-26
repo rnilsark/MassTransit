@@ -1,14 +1,13 @@
-# Configuring Simple Injector
+# Simple Injector
 
 Add reference to MassTransit.SimpleInjector NuGet package. The following example shows how to configure a  SimpleInjector container, and include the bus in the
 container. The two bus interfaces, `IBus` and `IBusControl`, are included.
 
-<div class="alert alert-info">
-<b>Note:</b>
-    Consumers should not typically depend upon <i>IBus</i> or <i>IBusControl</i>. A consumer should use the <i>ConsumeContext</i>
-    instead, which has all of the same methods as <i>IBus</i>, but is scoped to the receive endpoint. This ensures that
-    messages can be tracked between consumers, and are sent from the proper address.
-</div>
+::: tip
+Consumers should not typically depend upon <i>IBus</i> or <i>IBusControl</i>. A consumer should use the <i>ConsumeContext</i>
+instead, which has all of the same methods as <i>IBus</i>, but is scoped to the receive endpoint. This ensures that
+messages can be tracked between consumers, and are sent from the proper address.
+:::
 
 ```csharp
 public static void Main(string[] args)
@@ -28,26 +27,22 @@ public static void Main(string[] args)
         x.AddConsumers(typeof(ConsumerOne), typeof(ConsumerTwo));
 
         // add the bus to the container
-        x.AddBus(() => Bus.Factory.CreateUsingRabbitMq(cfg =>
+        x.UsingRabbitMq(cfg =>
         {
-            var host = cfg.Host(new Uri("rabbitmq://localhost"), hostConfigurator =>
-            {
-            });
-
             cfg.ReceiveEndpoint("customer_update", ec =>
             {
                 // Configure a single consumer
-                ec.ConfigureConsumer<UpdateCustomerConsumer>(container);
+                ec.ConfigureConsumer<UpdateCustomerConsumer>(context);
 
                 // configure all consumers
-                ec.ConfigureConsumers(container);
+                ec.ConfigureConsumers(context);
 
                 // configure consumer by type
-                ec.ConfigureConsumer(typeof(ConsumerOne), container);
+                ec.ConfigureConsumer(typeof(ConsumerOne), context);
             });
 
             // or, configure the endpoints by convention
-            cfg.ConfigureEndpoints(container);
+            cfg.ConfigureEndpoints(context);
         }));
     });
 

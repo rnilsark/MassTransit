@@ -3,7 +3,7 @@
     public static class MessageHeaders
     {
         /// <summary>
-        /// The reason for a message action being taken 
+        /// The reason for a message action being taken
         /// </summary>
         public const string Reason = "MT-Reason";
 
@@ -36,6 +36,11 @@
         /// The stack trace from a Fault
         /// </summary>
         public const string FaultStackTrace = "MT-Fault-StackTrace";
+
+        /// <summary>
+        /// The number of times the message was retried
+        /// </summary>
+        public const string FaultRetryCount = "MT-Fault-RetryCount";
 
         /// <summary>
         /// The endpoint that forwarded the message to the new destination
@@ -71,6 +76,21 @@
         /// Identifies the endpoint that handled the request
         /// </summary>
         public const string EndpointId = "MT-Request-EndpointId";
+
+        /// <summary>
+        /// The messageId, which is typically only in a transport header
+        /// </summary>
+        public const string MessageId = "MessageId";
+
+        /// <summary>
+        /// The Transport message ID, which is a string, because we can't assume anything
+        /// </summary>
+        public const string TransportMessageId = "TransportMessageId";
+
+        /// <summary>
+        /// When a transport header is used, this is the name
+        /// </summary>
+        public const string ContentType = "Content-Type";
 
 
         public static class Host

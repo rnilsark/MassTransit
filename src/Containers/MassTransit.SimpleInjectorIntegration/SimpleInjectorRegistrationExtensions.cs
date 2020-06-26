@@ -1,11 +1,9 @@
-
 namespace MassTransit
 {
-    using ConsumeConfigurators;
-    using Definition;
-    using Saga;
-
     using System;
+    using System.Linq;
+    using Mediator;
+    using Metadata;
     using SimpleInjector;
     using SimpleInjectorIntegration;
     using SimpleInjectorIntegration.Registration;
@@ -20,145 +18,64 @@ namespace MassTransit
         /// <summary>
         /// Adds the required services to the service collection, and allows consumers to be added and/or discovered
         /// </summary>
-        /// <param name="registry"></param>
+        /// <param name="container"></param>
         /// <param name="configure"></param>
-        public static void AddMassTransit(this Container registry, Action<ISimpleInjectorConfigurator> configure = null)
+        public static Container AddMassTransit(this Container container, Action<ISimpleInjectorBusConfigurator> configure = null)
         {
-            var configurator = new SimpleInjectorRegistrationConfigurator(registry);
+            if (container.GetCurrentRegistrations().Any(d => d.ServiceType == typeof(IBus)))
+            {
+                throw new ConfigurationException(
+                    "AddBus() was already called. To configure multiple bus instances, refer to the documentation: https://masstransit-project.com/usage/containers/multibus.html");
+            }
+
+            var configurator = new SimpleInjectorBusConfigurator(container);
 
             configure?.Invoke(configurator);
+
+            return container;
         }
 
         /// <summary>
-        /// Configure the endpoints for all defined consumer, saga, and activity types using an optional
-        /// endpoint name formatter. If no endpoint name formatter is specified and an <see cref="IEndpointNameFormatter"/>
-        /// is registered in the container, it is resolved from the container. Otherwise, the <see cref="DefaultEndpointNameFormatter"/>
-        /// is used.
+        /// Adds the required services to the service collection, and allows consumers to be added and/or discovered
         /// </summary>
-        /// <param name="configurator">The <see cref="IBusFactoryConfigurator"/> for the bus being configured</param>
-        /// <param name="container">The container reference</param>
-        /// <param name="endpointNameFormatter">Optional, the endpoint name formatter</param>
-        /// <typeparam name="T">The bus factory type (depends upon the transport)</typeparam>
-        public static void ConfigureEndpoints<T>(this T configurator, Container container, IEndpointNameFormatter endpointNameFormatter = null)
-            where T : IBusFactoryConfigurator
-        {
-            var registration = container.GetInstance<IRegistration>();
-
-            registration.ConfigureEndpoints(configurator, endpointNameFormatter);
-        }
-
-        /// <summary>
-        /// Configure a consumer (or consumers) on the receive endpoint
-        /// </summary>
-        /// <param name="configurator"></param>
-        /// <param name="container"></param>
-        /// <param name="consumerTypes">The consumer type(s) to configure</param>
-        public static void ConfigureConsumer(this IReceiveEndpointConfigurator configurator, Container container, params Type[] consumerTypes)
-        {
-            var registration = container.GetInstance<IRegistration>();
-
-            foreach (var consumerType in consumerTypes)
-            {
-                registration.ConfigureConsumer(consumerType, configurator);
-            }
-        }
-
-        /// <summary>
-        /// Configure a consumer on the receive endpoint, with an optional configuration action
-        /// </summary>
-        /// <param name="configurator"></param>
         /// <param name="container"></param>
         /// <param name="configure"></param>
-        public static void ConfigureConsumer<T>(this IReceiveEndpointConfigurator configurator, Container container,
-            Action<IConsumerConfigurator<T>> configure = null)
-            where T : class, IConsumer
+        public static Container AddMediator(this Container container, Action<ISimpleInjectorMediatorConfigurator> configure = null)
         {
-            var registration = container.GetInstance<IRegistration>();
+            if (container.GetCurrentRegistrations().Any(d => d.ServiceType == typeof(IMediator)))
+                throw new ConfigurationException("AddMediator() was already called and may only be called once per container.");
 
-            registration.ConfigureConsumer(configurator, configure);
+            var configurator = new SimpleInjectorMediatorConfigurator(container);
+
+            configure?.Invoke(configurator);
+
+            return container;
         }
 
         /// <summary>
-        /// Configure all registered consumers on the receive endpoint
+        /// Add consumers that were already added to the container to the registration
         /// </summary>
-        /// <param name="configurator"></param>
-        /// <param name="container"></param>
-        public static void ConfigureConsumers(this IReceiveEndpointConfigurator configurator, Container container)
+        public static void AddConsumersFromContainer(this IRegistrationConfigurator configurator, Container container)
         {
-            var registration = container.GetInstance<IRegistration>();
-
-            registration.ConfigureConsumers(configurator);
+            Type[] consumerTypes = container.FindTypes(TypeMetadataCache.IsConsumerOrDefinition);
+            configurator.AddConsumers(consumerTypes);
         }
 
         /// <summary>
-        /// Configure a saga (or sagas) on the receive endpoint
+        /// Add sagas that were already added to the container to the registration
         /// </summary>
-        /// <param name="configurator"></param>
-        /// <param name="container"></param>
-        /// <param name="sagaTypes">The saga type(s) to configure</param>
-        public static void ConfigureSaga(this IReceiveEndpointConfigurator configurator, Container container, params Type[] sagaTypes)
+        public static void AddSagasFromContainer(this IRegistrationConfigurator configurator, Container container)
         {
-            var registration = container.GetInstance<IRegistration>();
-
-            foreach (var sagaType in sagaTypes)
-            {
-                registration.ConfigureSaga(sagaType, configurator);
-            }
+            Type[] sagaTypes = container.FindTypes(TypeMetadataCache.IsSagaOrDefinition);
+            configurator.AddSagas(sagaTypes);
         }
 
-        /// <summary>
-        /// Configure a saga on the receive endpoint, with an optional configuration action
-        /// </summary>
-        /// <param name="configurator"></param>
-        /// <param name="container"></param>
-        /// <param name="configure"></param>
-        public static void ConfigureSaga<T>(this IReceiveEndpointConfigurator configurator, Container container,
-            Action<ISagaConfigurator<T>> configure = null)
-            where T : class, ISaga
+        static Type[] FindTypes(this Container container, Func<Type, bool> filter)
         {
-            var registration = container.GetInstance<IRegistration>();
-
-            registration.ConfigureSaga(configurator, configure);
-        }
-
-        /// <summary>
-        /// Configure all registered sagas on the receive endpoint
-        /// </summary>
-        /// <param name="configurator"></param>
-        /// <param name="container"></param>
-        public static void ConfigureSagas(this IReceiveEndpointConfigurator configurator, Container container)
-        {
-            var registration = container.GetInstance<IRegistration>();
-
-            registration.ConfigureSagas(configurator);
-        }
-
-        /// <summary>
-        /// Configure the execute activity on the receive endpoint
-        /// </summary>
-        /// <param name="configurator"></param>
-        /// <param name="container"></param>
-        /// <param name="activityType"></param>
-        public static void ConfigureExecuteActivity(this IReceiveEndpointConfigurator configurator, Container container, Type activityType)
-        {
-            var registration = container.GetInstance<IRegistration>();
-
-            registration.ConfigureExecuteActivity(activityType, configurator);
-        }
-
-        /// <summary>
-        /// Configure an activity on two endpoints, one for execute, and the other for compensate
-        /// </summary>
-        /// <param name="executeEndpointConfigurator"></param>
-        /// <param name="compensateEndpointConfigurator"></param>
-        /// <param name="container"></param>
-        /// <param name="activityType"></param>
-        public static void ConfigureActivity(this IReceiveEndpointConfigurator executeEndpointConfigurator,
-            IReceiveEndpointConfigurator compensateEndpointConfigurator, Container container, Type activityType)
-        {
-            var registration = container.GetInstance<IRegistration>();
-
-            registration.ConfigureActivity(activityType, executeEndpointConfigurator, compensateEndpointConfigurator);
+            return container.GetCurrentRegistrations()
+                .Where(rs => filter(rs.Registration.ImplementationType))
+                .Select(rs => rs.Registration.ImplementationType)
+                .ToArray();
         }
     }
 }

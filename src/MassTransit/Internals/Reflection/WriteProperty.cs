@@ -1,35 +1,32 @@
 ﻿namespace MassTransit.Internals.Reflection
 {
     using System;
-    using System.Diagnostics;
     using System.Linq.Expressions;
     using System.Reflection;
     using System.Threading;
     using System.Threading.Tasks;
-    using MassTransit;
 
 
     public class WriteProperty<T, TProperty> :
         IWriteProperty<T, TProperty>
+        where T : class
     {
         Action<T, TProperty> _setMethod;
 
-        public WriteProperty(Type implementationType, string propertyName)
+        public WriteProperty(Type implementationType, PropertyInfo propertyInfo)
         {
-            if (typeof(T).GetTypeInfo().IsValueType)
-                throw new ArgumentException("The message type must be a reference type");
-
-            var propertyInfo = implementationType.GetProperty(propertyName);
-            if (propertyInfo == null)
-                throw new ArgumentException("The implementation does not have a property named: " + propertyName);
+            TargetType = implementationType;
 
             var setMethod = propertyInfo.GetSetMethod(true);
             if (setMethod == null)
-                throw new ArgumentException("The property does not have an accessible set method");
+                throw new ArgumentException($"The property does not have an accessible set method: {propertyInfo.Name}");
 
-            Name = propertyName;
+            // look for <Address>k__BackingField and use a field setter if available
 
-            void SetUsingReflection(T entity, TProperty property) => setMethod.Invoke(entity, new object[] {property});
+            void SetUsingReflection(T entity, TProperty property)
+            {
+                setMethod.Invoke(entity, new object[] {property});
+            }
 
             void Initialize(T entity, TProperty property)
             {
@@ -37,14 +34,13 @@
 
                 SetUsingReflection(entity, property);
 
-                Task.Factory.StartNew(() => GenerateExpressionSetMethod(implementationType, setMethod),
-                    CancellationToken.None, TaskCreationOptions.None, TaskScheduler.Default);
+                Task.Run(() => GenerateExpressionSetMethod(implementationType, setMethod));
             }
 
             _setMethod = Initialize;
         }
 
-        public string Name { get; }
+        public Type TargetType { get; }
 
         public void Set(T content, TProperty value)
         {
@@ -53,25 +49,15 @@
 
         async Task GenerateExpressionSetMethod(Type implementationType, MethodInfo setMethod)
         {
-            await Task.Yield();
-
             try
             {
-                var fastSetMethod = CompileSetMethod(implementationType, setMethod);
+                Action<T, TProperty> fastSetMethod = CompileSetMethod(implementationType, setMethod);
 
                 Interlocked.Exchange(ref _setMethod, fastSetMethod);
             }
-        #if NETCORE
             catch (Exception)
             {
             }
-            #else
-            catch (Exception ex)
-            {
-                if (Trace.Listeners.Count > 0)
-                    Trace.WriteLine(ex.Message);
-            }
-        #endif
         }
 
         static Action<T, TProperty> CompileSetMethod(Type implementationType, MethodInfo setMethod)
@@ -84,9 +70,9 @@
 
                 var call = Expression.Call(cast, setMethod, value);
 
-                var lambdaExpression = Expression.Lambda<Action<T, TProperty>>(call, instance, value);
+                Expression<Action<T, TProperty>> lambdaExpression = Expression.Lambda<Action<T, TProperty>>(call, instance, value);
 
-                return ExpressionCompiler.CompileFast<Action<T, TProperty>>(lambdaExpression);
+                return lambdaExpression.CompileFast<Action<T, TProperty>>();
             }
             catch (Exception ex)
             {

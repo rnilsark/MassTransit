@@ -1,16 +1,4 @@
-﻿// Copyright 2007-2016 Chris Patterson, Dru Sellers, Travis Smith, et. al.
-//  
-// Licensed under the Apache License, Version 2.0 (the "License"); you may not use
-// this file except in compliance with the License. You may obtain a copy of the 
-// License at 
-// 
-//     http://www.apache.org/licenses/LICENSE-2.0 
-// 
-// Unless required by applicable law or agreed to in writing, software distributed
-// under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR 
-// CONDITIONS OF ANY KIND, either express or implied. See the License for the 
-// specific language governing permissions and limitations under the License.
-namespace GreenPipes
+﻿namespace GreenPipes
 {
     using System;
     using Configurators;
@@ -23,19 +11,6 @@ namespace GreenPipes
 
     public static class RetryPipeConfiguratorExtensions
     {
-        [Obsolete("Use of the lambda-based policy configurator is recommended")]
-        public static void UseRetry(this IPipeConfigurator<ConsumeContext> configurator, IRetryPolicy retryPolicy)
-        {
-            if (configurator == null)
-                throw new ArgumentNullException(nameof(configurator));
-
-            var specification = new ConsumeContextRetryPipeSpecification();
-
-            specification.SetRetryPolicy(x => retryPolicy);
-
-            configurator.AddPipeSpecification(specification);
-        }
-
         public static void UseRetry(this IPipeConfigurator<ConsumeContext> configurator, Action<IRetryConfigurator> configure)
         {
             if (configurator == null)
@@ -79,8 +54,7 @@ namespace GreenPipes
             configurator.AddPipeSpecification(specification);
         }
 
-        [Obsolete("Use of the lambda-based policy configurator is recommended")]
-        public static void UseRetry<T>(this IPipeConfigurator<ConsumeContext<T>> configurator, IRetryPolicy retryPolicy)
+        public static void UseRetry<T>(this IPipeConfigurator<ConsumeContext<T>> configurator, Action<IRetryConfigurator> configure)
             where T : class
         {
             if (configurator == null)
@@ -88,12 +62,12 @@ namespace GreenPipes
 
             var specification = new ConsumeContextRetryPipeSpecification<ConsumeContext<T>, RetryConsumeContext<T>>(Factory);
 
-            specification.SetRetryPolicy(x => retryPolicy);
+            configure?.Invoke(specification);
 
             configurator.AddPipeSpecification(specification);
         }
 
-        public static void UseRetry<T>(this IPipeConfigurator<ConsumeContext<T>> configurator, Action<IRetryConfigurator> configure)
+        public static void UseRetry<T>(this IConsumePipeConfigurator configurator, Action<IRetryConfigurator> configure)
             where T : class
         {
             if (configurator == null)
@@ -127,20 +101,6 @@ namespace GreenPipes
             where T : class
         {
             return new RetryConsumeContext<T>(context, retryPolicy, retryContext);
-        }
-
-        [Obsolete("Use of the lambda-based policy configurator is recommended")]
-        public static void UseRetry<TConsumer>(this IPipeConfigurator<ConsumerConsumeContext<TConsumer>> configurator, IRetryPolicy retryPolicy)
-            where TConsumer : class
-        {
-            if (configurator == null)
-                throw new ArgumentNullException(nameof(configurator));
-
-            var specification = new ConsumeContextRetryPipeSpecification<ConsumerConsumeContext<TConsumer>, RetryConsumerConsumeContext<TConsumer>>(Factory);
-
-            specification.SetRetryPolicy(x => retryPolicy);
-
-            configurator.AddPipeSpecification(specification);
         }
 
         public static void UseRetry<TConsumer>(this IPipeConfigurator<ConsumerConsumeContext<TConsumer>> configurator, Action<IRetryConfigurator> configure)
@@ -180,20 +140,6 @@ namespace GreenPipes
             where TConsumer : class
         {
             return new RetryConsumerConsumeContext<TConsumer>(context, retryPolicy, retryContext);
-        }
-
-        [Obsolete("Use of the lambda-based policy configurator is recommended")]
-        public static void UseRetry<TSaga>(this IPipeConfigurator<SagaConsumeContext<TSaga>> configurator, IRetryPolicy retryPolicy)
-            where TSaga : class, ISaga
-        {
-            if (configurator == null)
-                throw new ArgumentNullException(nameof(configurator));
-
-            var specification = new ConsumeContextRetryPipeSpecification<SagaConsumeContext<TSaga>, RetrySagaConsumeContext<TSaga>>(Factory);
-
-            specification.SetRetryPolicy(x => retryPolicy);
-
-            configurator.AddPipeSpecification(specification);
         }
 
         public static void UseRetry<TSaga>(this IPipeConfigurator<SagaConsumeContext<TSaga>> configurator, Action<IRetryConfigurator> configure)

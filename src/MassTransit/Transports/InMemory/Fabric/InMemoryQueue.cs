@@ -1,20 +1,10 @@
-﻿// Copyright 2007-2017 Chris Patterson, Dru Sellers, Travis Smith, et. al.
-//  
-// Licensed under the Apache License, Version 2.0 (the "License"); you may not use
-// this file except in compliance with the License. You may obtain a copy of the 
-// License at 
-// 
-//     http://www.apache.org/licenses/LICENSE-2.0 
-// 
-// Unless required by applicable law or agreed to in writing, software distributed
-// under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR 
-// CONDITIONS OF ANY KIND, either express or implied. See the License for the 
-// specific language governing permissions and limitations under the License.
-namespace MassTransit.Transports.InMemory.Fabric
+﻿namespace MassTransit.Transports.InMemory.Fabric
 {
     using System;
     using System.Threading;
     using System.Threading.Tasks;
+    using GreenPipes;
+    using GreenPipes.Util;
     using Util;
 
 
@@ -23,6 +13,7 @@ namespace MassTransit.Transports.InMemory.Fabric
     {
         readonly CancellationTokenSource _cancellationToken;
         readonly TaskCompletionSource<IInMemoryQueueConsumer> _consumer;
+        readonly Connectable<IInMemoryQueueConsumer> _consumers;
         readonly string _name;
         readonly LimitedConcurrencyLevelTaskScheduler _scheduler;
         int _queueDepth;
@@ -33,15 +24,20 @@ namespace MassTransit.Transports.InMemory.Fabric
             _scheduler = new LimitedConcurrencyLevelTaskScheduler(concurrencyLevel);
             _cancellationToken = new CancellationTokenSource();
 
-            _consumer = new TaskCompletionSource<IInMemoryQueueConsumer>();
+            _consumers = new Connectable<IInMemoryQueueConsumer>();
+            _consumer = Util.TaskUtil.GetTask<IInMemoryQueueConsumer>();
             _cancellationToken.Token.Register(() => _consumer.TrySetCanceled());
         }
 
-        public void ConnectConsumer(IInMemoryQueueConsumer consumer)
+        public ConnectHandle ConnectConsumer(IInMemoryQueueConsumer consumer)
         {
             try
             {
+                var handle = _consumers.Connect(consumer);
+
                 _consumer.SetResult(consumer);
+
+                return handle;
             }
             catch (Exception exception)
             {
@@ -70,7 +66,7 @@ namespace MassTransit.Transports.InMemory.Fabric
 
             try
             {
-                await consumer.Consume(message, _cancellationToken.Token).ConfigureAwait(false);
+                await _consumers.ForEachAsync(x => x.Consume(message, _cancellationToken.Token)).ConfigureAwait(false);
             }
             catch
             {

@@ -1,16 +1,4 @@
-﻿// Copyright 2007-2015 Chris Patterson, Dru Sellers, Travis Smith, et. al.
-//  
-// Licensed under the Apache License, Version 2.0 (the "License"); you may not use
-// this file except in compliance with the License. You may obtain a copy of the 
-// License at 
-// 
-//     http://www.apache.org/licenses/LICENSE-2.0 
-// 
-// Unless required by applicable law or agreed to in writing, software distributed
-// under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR 
-// CONDITIONS OF ANY KIND, either express or implied. See the License for the 
-// specific language governing permissions and limitations under the License.
-namespace MassTransit.Configurators
+﻿namespace MassTransit.Configurators
 {
     using System;
     using System.Collections.Generic;
@@ -19,7 +7,8 @@ namespace MassTransit.Configurators
     using GreenPipes;
 
 
-    [Serializable, DebuggerDisplay("{DebuggerString()}")]
+    [Serializable]
+    [DebuggerDisplay("{DebuggerString()}")]
     public class BusConfigurationResult :
         ConfigurationResult
     {
@@ -39,7 +28,7 @@ namespace MassTransit.Configurators
 
         protected string DebuggerString()
         {
-            string debuggerString = string.Join(", ", _results);
+            var debuggerString = string.Join(", ", _results);
 
             return string.IsNullOrWhiteSpace(debuggerString)
                 ? "No Obvious Problems says ConfigurationResult"
@@ -49,17 +38,24 @@ namespace MassTransit.Configurators
         public static ConfigurationResult CompileResults(IEnumerable<ValidationResult> results)
         {
             var result = new BusConfigurationResult(results);
+            if (!result.ContainsFailure)
+                return result;
 
-            if (result.ContainsFailure)
-            {
-                string message = "The service bus was not properly configured:" +
-                    Environment.NewLine +
-                    string.Join(Environment.NewLine, result.Results.Select(x => x.ToString()).ToArray());
+            var message = "The service bus was not properly configured:" + Environment.NewLine +
+                string.Join(Environment.NewLine, result.Results.Select(x => x.ToString()).ToArray());
 
-                throw new ConfigurationException(result, message);
-            }
+            throw new ConfigurationException(result, message);
+        }
 
-            return result;
+        public static ConfigurationResult CompileResults(IEnumerable<ValidationResult> results, string messagePrefix)
+        {
+            var result = new BusConfigurationResult(results);
+            if (!result.ContainsFailure)
+                return result;
+
+            var message = messagePrefix + Environment.NewLine + string.Join(Environment.NewLine, result.Results.Select(x => x.ToString()).ToArray());
+
+            throw new ConfigurationException(result, message);
         }
     }
 }

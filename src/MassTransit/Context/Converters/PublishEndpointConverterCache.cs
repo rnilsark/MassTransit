@@ -15,18 +15,18 @@ namespace MassTransit.Context.Converters
     {
         readonly ConcurrentDictionary<Type, Lazy<IPublishEndpointConverter>> _types = new ConcurrentDictionary<Type, Lazy<IPublishEndpointConverter>>();
 
-        public static Task Publish(IPublishEndpoint endpoint, object message, Type messageType, CancellationToken cancellationToken = default(CancellationToken))
+        IPublishEndpointConverter this[Type type] => _types.GetOrAdd(type, CreateTypeConverter).Value;
+
+        public static Task Publish(IPublishEndpoint endpoint, object message, Type messageType, CancellationToken cancellationToken = default)
         {
             return Cached.Converters.Value[messageType].Publish(endpoint, message, cancellationToken);
         }
 
         public static Task Publish(IPublishEndpoint endpoint, object message, Type messageType, IPipe<PublishContext> pipe,
-            CancellationToken cancellationToken = default(CancellationToken))
+            CancellationToken cancellationToken = default)
         {
             return Cached.Converters.Value[messageType].Publish(endpoint, message, pipe, cancellationToken);
         }
-
-        IPublishEndpointConverter this[Type type] => _types.GetOrAdd(type, CreateTypeConverter).Value;
 
         static Lazy<IPublishEndpointConverter> CreateTypeConverter(Type type)
         {
@@ -35,7 +35,7 @@ namespace MassTransit.Context.Converters
 
         static IPublishEndpointConverter CreateConverter(Type type)
         {
-            Type converterType = typeof(PublishEndpointConverter<>).MakeGenericType(type);
+            var converterType = typeof(PublishEndpointConverter<>).MakeGenericType(type);
 
             return (IPublishEndpointConverter)Activator.CreateInstance(converterType);
         }

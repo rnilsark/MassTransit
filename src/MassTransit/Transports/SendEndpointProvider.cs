@@ -1,15 +1,3 @@
-// Copyright 2007-2018 Chris Patterson, Dru Sellers, Travis Smith, et. al.
-//  
-// Licensed under the Apache License, Version 2.0 (the "License"); you may not use
-// this file except in compliance with the License. You may obtain a copy of the 
-// License at 
-// 
-//     http://www.apache.org/licenses/LICENSE-2.0 
-// 
-// Unless required by applicable law or agreed to in writing, software distributed
-// under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR 
-// CONDITIONS OF ANY KIND, either express or implied. See the License for the 
-// specific language governing permissions and limitations under the License.
 namespace MassTransit.Transports
 {
     using System;
@@ -24,14 +12,15 @@ namespace MassTransit.Transports
     {
         readonly ISendEndpointCache<Uri> _cache;
         readonly SendObservable _observers;
+        readonly ISendTransportProvider _provider;
         readonly ISendPipe _sendPipe;
         readonly IMessageSerializer _serializer;
         readonly Uri _sourceAddress;
-        readonly ISendTransportProvider _transportProvider;
 
-        public SendEndpointProvider(ISendTransportProvider transportProvider, SendObservable observers, IMessageSerializer serializer, Uri sourceAddress, ISendPipe sendPipe)
+        public SendEndpointProvider(ISendTransportProvider provider, SendObservable observers, IMessageSerializer serializer, Uri sourceAddress,
+            ISendPipe sendPipe)
         {
-            _transportProvider = transportProvider;
+            _provider = provider;
             _serializer = serializer;
             _sourceAddress = sourceAddress;
             _sendPipe = sendPipe;
@@ -42,6 +31,8 @@ namespace MassTransit.Transports
 
         public Task<ISendEndpoint> GetSendEndpoint(Uri address)
         {
+            address = _provider.NormalizeAddress(address);
+
             return _cache.GetSendEndpoint(address, CreateSendEndpoint);
         }
 
@@ -52,7 +43,7 @@ namespace MassTransit.Transports
 
         async Task<ISendEndpoint> CreateSendEndpoint(Uri address)
         {
-            var sendTransport = await _transportProvider.GetSendTransport(address).ConfigureAwait(false);
+            var sendTransport = await _provider.GetSendTransport(address).ConfigureAwait(false);
 
             var handle = sendTransport.ConnectSendObserver(_observers);
 

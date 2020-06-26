@@ -1,4 +1,4 @@
-# Configuring Autofac
+# Autofac
 
 Autofac is a powerful and fast container, and is well supported by MassTransit. Nested lifetime scopes are used extensively to encapsulate dependencies and ensure clean object lifetime management. The following examples show the various ways that MassTransit can be configured, including the appropriate interfaces necessary.
 
@@ -6,10 +6,9 @@ A sample project for the container registration code is available on [GitHub](ht
 
 > Requires NuGets `MassTransit`, `MassTransit.AutoFac`, and `MassTransit.RabbitMQ`
 
-<div class="alert alert-info">
-<b>Note:</b>
-    Consumers should not depend upon <i>IBus</i> or <i>IBusControl</i>. A consumer should use the <i>ConsumeContext</i> instead, which has all of the same methods as <i>IBus</i>, but is scoped to the receive endpoint. This ensures that messages can be tracked between consumers and are sent from the proper address.
-</div>
+::: tip
+Consumers should not depend upon <i>IBus</i> or <i>IBusControl</i>. A consumer should use the <i>ConsumeContext</i> instead, which has all of the same methods as <i>IBus</i>, but is scoped to the receive endpoint. This ensures that messages can be tracked between consumers and are sent from the proper address.
+:::
 
 ```csharp
 using System;
@@ -46,9 +45,9 @@ namespace Example
                 x.AddConsumers(typeof(ConsumerOne), typeof(ConsumerTwo));
 
                 // add the bus to the container
-                x.AddBus(context => Bus.Factory.CreateUsingRabbitMq(cfg =>
+                x.UsingRabbitMq(cfg =>
                 {
-                    var host = cfg.Host("localhost/");
+                    cfg.Host("localhost");
 
                     cfg.ReceiveEndpoint("customer_update", ec =>
                     {
@@ -103,7 +102,8 @@ builder.Register(context =>
 Autofac modules are great for encapsulating configuration, and that is equally true when using MassTransit. An example of using modules with Autofac is shown below.
 
 ```csharp
-class ConsumerModule : Module
+class ConsumerModule : 
+Module
 {
     protected override void Load(ContainerBuilder builder)
     {
@@ -117,7 +117,8 @@ class ConsumerModule : Module
     }
 }
 
-class BusModule : Module
+class BusModule : 
+    Module
 {
     protected override void Load(ContainerBuilder builder)
     {
@@ -127,15 +128,17 @@ class BusModule : Module
 
             var busControl = Bus.Factory.CreateUsingRabbitMq(cfg =>
             {
-                var host = cfg.Host(busSettings.HostAddress, h =>
+                cfg.Host(busSettings.HostAddress, h =>
                 {
                     h.Username(busSettings.Username);
                     h.Password(busSettings.Password);
                 });
 
+                cfg.AddConsumersFromContainer(context);
+
                 cfg.ReceiveEndpoint(busSettings.QueueName, ec =>
                 {
-                    ec.LoadFrom(context);
+                    ec.ConfigureConsumers(context);
                 })
             });
         })
@@ -147,27 +150,18 @@ class BusModule : Module
 
 public IContainer CreateContainer()
 {
-        var builder = new ContainerBuilder();
+    var builder = new ContainerBuilder();
 
     builder.RegisterModule<BusModule>();
     builder.RegisterModule<ConsumerModule>();
 
     return builder.Build();
 }
-
-public void CreateContainer()
-{
-    _container = new Container(x =>
-    {
-        x.AddRegistry(new BusRegistry());
-        x.AddRegistry(new ConsumerRegistry());
-    });
-}
 ```
 
 ## Registering State Machine Sagas
 
-By using an additional package `MassTransit.Automatonymous.Autofac` you can also register state machine sagas:
+You can also register state machine sagas:
 
 ```csharp
 var builder = new ContainerBuilder();
@@ -188,7 +182,7 @@ and load them from a contained when configuring the bus.
 ```csharp
 var busControl = Bus.Factory.CreateUsingRabbitMq(cfg =>
 {
-    var host = cfg.Host(busSettings.HostAddress, h =>
+    cfg.Host(busSettings.HostAddress, h =>
     {
         h.Username(busSettings.Username);
         h.Password(busSettings.Password);
@@ -235,18 +229,23 @@ builder.RegisterGeneric(typeof(NHibernateSagaRepository<>))
 
 Entity Framework saga repository needs to have a context factory as a constructor parameter. This factory just returns a `DbContext` instance, which should have the information about the saga instance class mapping.
 
-When using the `SagaDbContext<TSaga, TSagaClassMapping>`, you need to register each repository separately like this:
+You can register repository for your `SagaDbContext` like this:
 
 ```csharp
-builder.Register(c => new EntityFrameworkSagaRepository<MySaga>(
-    () => new SagaDbContext<MySaga, MySagaMapping>(connectionString)))
+//Optimistic
+builder.Register(c => EntityFrameworkSagaRepository<MySaga>.CreateOptimistic(
+    () => new YourSagaDbContext(connectionString)))
+        .As<ISagaRepository<MySaga>>().SingleInstance();
+//Pessimistic
+builder.Register(c => EntityFrameworkSagaRepository<MySaga>.CreatePessimistic(
+    () => new YourSagaDbContext(connectionString)))
         .As<ISagaRepository<MySaga>>().SingleInstance();
 ```
 
 You can use your own context implementation and register the repository as generic like this:
 
 ```csharp
-builder.Register(c => new AssemblyScanningSagaDbContext(typeof(MySagaMapping).Assembly,
+builder.Register(c => new AssemblyScanningSagaDbContext(typeof(MySagaClassMap).Assembly,
     connectionString).As<DbContext>();
 builder.RegisterGeneric(typeof(EntityFrameworkSagaRepository<>))
     .As(typeof(ISagaRepository<>))
@@ -255,3 +254,29 @@ builder.RegisterStateMachineSagas(typeof(MySaga).Assembly);
 ```
 
 The example above uses the assembly scanning `DbContext` implementation, which you can find in [this gist](https://gist.github.com/alexeyzimarev/34542645ff8f27550d0679c7cb696111).
+
+### MongoDB
+
+Preferred way to use MongoDB saga repository is providing `IMongoDatabase` with `IMongoDbSagaConsumeContextFactory` and `ICollectionNameFormatter` as constructor parameters.
+
+You can register repository like this:
+
+```csharp
+//register default collection name formatter or you could use DotCaseCollectionNameFormatter (SimpleSaga -> simple.sagas). Also you can create your own
+builder.Register<DefaultCollectionNameFormatter>()
+  		 .As<ICollectionNameFormatter>()
+  		 .SingleInstance()
+builder.Register<MongoDbSagaConsumeContextFactory>()
+  		 .As<IMongoDbSagaConsumeContextFactory>()
+  		 .SingleInstance()
+  
+var database = new MongoClient("mongodb://127.0.0.1").GetDatabase("sagas");
+builder.Register(c => new MongoDbSagaRepository<MySaga>(
+        database,
+        c.Resolve<IMongoDbSagaConsumeContextFactory>(),
+        c.Resolve<ICollectionNameFormatter>()
+))
+  .As<ISagaRepository<MySaga>>()
+  .SingleInstance();
+```
+

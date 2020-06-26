@@ -7,6 +7,7 @@
     using System.Threading.Tasks;
     using GreenPipes;
     using GreenPipes.Agents;
+    using GreenPipes.Internals.Extensions;
     using Pipeline.Observables;
     using Util;
 
@@ -234,11 +235,27 @@
                 readonly CancellationToken _cancellationToken;
                 readonly ConnectHandle _handle;
                 readonly TaskCompletionSource<ReceiveEndpointReady> _ready;
+                ReceiveEndpointFaulted _faulted;
+                CancellationTokenRegistration _registration;
 
-                public Observer(IReceiveEndpoint endpoint, CancellationToken cancellationToken)
+                public Observer(IReceiveEndpointObserverConnector endpoint, CancellationToken cancellationToken)
                 {
                     _cancellationToken = cancellationToken;
-                    _ready = new TaskCompletionSource<ReceiveEndpointReady>();
+                    _ready = TaskUtil.GetTask<ReceiveEndpointReady>();
+
+                    if (cancellationToken.CanBeCanceled)
+                    {
+                        _registration = cancellationToken.Register(() =>
+                        {
+                            if (_faulted != null)
+                            {
+                                _handle?.Disconnect();
+                                _ready.TrySetExceptionOnThreadPool(_faulted.Exception);
+                            }
+
+                            _registration.Dispose();
+                        });
+                    }
 
                     _handle = endpoint.ConnectReceiveEndpointObserver(this);
                 }
@@ -247,10 +264,14 @@
 
                 Task IReceiveEndpointObserver.Ready(ReceiveEndpointReady ready)
                 {
-                    _ready.TrySetResult(ready);
-
                     _handle.Disconnect();
+                    _registration.Dispose();
 
+                    return _ready.TrySetResultOnThreadPool(ready);
+                }
+
+                public Task Stopping(ReceiveEndpointStopping stopping)
+                {
                     return TaskUtil.Completed;
                 }
 
@@ -261,14 +282,25 @@
 
                 Task IReceiveEndpointObserver.Faulted(ReceiveEndpointFaulted faulted)
                 {
-                    if (_cancellationToken.IsCancellationRequested)
-                    {
-                        _ready.TrySetExceptionWithBackgroundContinuations(faulted.Exception);
+                    _faulted = faulted;
 
+                    if (_cancellationToken.IsCancellationRequested || IsUnrecoverable(faulted.Exception))
+                    {
                         _handle.Disconnect();
+
+                        return _ready.TrySetExceptionOnThreadPool(faulted.Exception);
                     }
 
                     return TaskUtil.Completed;
+                }
+
+                static bool IsUnrecoverable(Exception exception)
+                {
+                    return exception switch
+                    {
+                        ConnectionException connectionException => !connectionException.IsTransient,
+                        _ => false
+                    };
                 }
             }
         }

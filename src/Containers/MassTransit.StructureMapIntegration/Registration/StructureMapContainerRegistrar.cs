@@ -1,25 +1,16 @@
-// Copyright 2007-2019 Chris Patterson, Dru Sellers, Travis Smith, et. al.
-//  
-// Licensed under the Apache License, Version 2.0 (the "License"); you may not use
-// this file except in compliance with the License. You may obtain a copy of the 
-// License at 
-// 
-//     http://www.apache.org/licenses/LICENSE-2.0 
-// 
-// Unless required by applicable law or agreed to in writing, software distributed
-// under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR 
-// CONDITIONS OF ANY KIND, either express or implied. See the License for the 
-// specific language governing permissions and limitations under the License.
 namespace MassTransit.StructureMapIntegration.Registration
 {
     using System;
+    using Automatonymous;
+    using Clients;
     using Courier;
     using Definition;
-    using StructureMap;
     using MassTransit.Registration;
+    using Mediator;
     using Saga;
     using ScopeProviders;
     using Scoping;
+    using StructureMap;
 
 
     public class StructureMapContainerRegistrar :
@@ -51,6 +42,30 @@ namespace MassTransit.StructureMapIntegration.Registration
         {
         }
 
+        public void RegisterSagaStateMachine<TStateMachine, TInstance>()
+            where TStateMachine : class, SagaStateMachine<TInstance>
+            where TInstance : class, SagaStateMachineInstance
+        {
+            _expression.For<TStateMachine>().Singleton();
+            _expression.For<SagaStateMachine<TInstance>>().Use(provider => provider.GetInstance<TStateMachine>()).Singleton();
+        }
+
+        public void RegisterSagaRepository<TSaga>(Func<IConfigurationServiceProvider, ISagaRepository<TSaga>> repositoryFactory)
+            where TSaga : class, ISaga
+        {
+            RegisterSingleInstance(provider => repositoryFactory(provider));
+        }
+
+        void IContainerRegistrar.RegisterSagaRepository<TSaga, TContext, TConsumeContextFactory, TRepositoryContextFactory>()
+        {
+            _expression.For<ISagaConsumeContextFactory<TContext, TSaga>>().Use<TConsumeContextFactory>();
+            _expression.For<ISagaRepositoryContextFactory<TSaga>>().Use<TRepositoryContextFactory>();
+
+            _expression.ForConcreteType<StructureMapSagaRepositoryContextFactory<TSaga>>();
+            _expression.For<ISagaRepository<TSaga>>()
+                .Use(context => new SagaRepository<TSaga>(context.GetInstance<StructureMapSagaRepositoryContextFactory<TSaga>>())).Singleton();
+        }
+
         public void RegisterSagaDefinition<TDefinition, TSaga>()
             where TDefinition : class, ISagaDefinition<TSaga>
             where TSaga : class, ISaga
@@ -60,7 +75,7 @@ namespace MassTransit.StructureMapIntegration.Registration
         }
 
         public void RegisterExecuteActivity<TActivity, TArguments>()
-            where TActivity : class, ExecuteActivity<TArguments>
+            where TActivity : class, IExecuteActivity<TArguments>
             where TArguments : class
         {
             _expression.ForConcreteType<TActivity>();
@@ -69,9 +84,19 @@ namespace MassTransit.StructureMapIntegration.Registration
                 .Use(context => CreateExecuteActivityScopeProvider<TActivity, TArguments>(context));
         }
 
+        public void RegisterCompensateActivity<TActivity, TLog>()
+            where TActivity : class, ICompensateActivity<TLog>
+            where TLog : class
+        {
+            _expression.ForConcreteType<TActivity>();
+
+            _expression.For<ICompensateActivityScopeProvider<TActivity, TLog>>()
+                .Use(context => CreateCompensateActivityScopeProvider<TActivity, TLog>(context));
+        }
+
         public void RegisterActivityDefinition<TDefinition, TActivity, TArguments, TLog>()
             where TDefinition : class, IActivityDefinition<TActivity, TArguments, TLog>
-            where TActivity : class, Activity<TArguments, TLog>
+            where TActivity : class, IActivity<TArguments, TLog>
             where TArguments : class
             where TLog : class
         {
@@ -81,7 +106,7 @@ namespace MassTransit.StructureMapIntegration.Registration
 
         public void RegisterExecuteActivityDefinition<TDefinition, TActivity, TArguments>()
             where TDefinition : class, IExecuteActivityDefinition<TActivity, TArguments>
-            where TActivity : class, ExecuteActivity<TArguments>
+            where TActivity : class, IExecuteActivity<TArguments>
             where TArguments : class
         {
             _expression.For<IExecuteActivityDefinition<TActivity, TArguments>>()
@@ -110,50 +135,89 @@ namespace MassTransit.StructureMapIntegration.Registration
             _expression.For<IRequestClient<T>>().Use(context => CreateRequestClient<T>(destinationAddress, timeout, context));
         }
 
-        static IRequestClient<T> CreateRequestClient<T>(RequestTimeout timeout, IContext context)
+        public void Register<T, TImplementation>()
             where T : class
+            where TImplementation : class, T
         {
-            var clientFactory = context.GetInstance<IClientFactory>();
-
-            var consumeContext = context.TryGetInstance<ConsumeContext>();
-            return consumeContext != null
-                ? clientFactory.CreateRequestClient<T>(consumeContext, timeout)
-                : clientFactory.CreateRequestClient<T>(timeout);
+            _expression.For<T>().Use<TImplementation>();
         }
 
-        static IRequestClient<T> CreateRequestClient<T>(Uri destinationAddress, RequestTimeout timeout, IContext context)
+        public void Register<T>(Func<IConfigurationServiceProvider, T> factoryMethod)
             where T : class
         {
-            var clientFactory = context.GetInstance<IClientFactory>();
-
-            var consumeContext = context.TryGetInstance<ConsumeContext>();
-            return consumeContext != null
-                ? clientFactory.CreateRequestClient<T>(consumeContext, destinationAddress, timeout)
-                : clientFactory.CreateRequestClient<T>(destinationAddress, timeout);
+            _expression.For<T>().Use(context => factoryMethod(new StructureMapConfigurationServiceProvider(context.GetInstance<IContainer>())));
         }
 
-        public void RegisterCompensateActivity<TActivity, TLog>()
-            where TActivity : class, CompensateActivity<TLog>
-            where TLog : class
+        public void RegisterSingleInstance<T>(Func<IConfigurationServiceProvider, T> factoryMethod)
+            where T : class
         {
-            _expression.ForConcreteType<TActivity>();
+            _expression.For<T>().Use(context => factoryMethod(new StructureMapConfigurationServiceProvider(context.GetInstance<IContainer>())));
+        }
 
-            _expression.For<ICompensateActivityScopeProvider<TActivity, TLog>>()
-                .Use(context => CreateCompensateActivityScopeProvider<TActivity, TLog>(context));
+        public void RegisterSingleInstance<T>(T instance)
+            where T : class
+        {
+            _expression.For<T>().Use(instance).Singleton();
+        }
+
+        IRequestClient<T> CreateRequestClient<T>(RequestTimeout timeout, IContext context)
+            where T : class
+        {
+            var clientFactory = GetClientFactory(context);
+            var consumeContext = context.TryGetInstance<ConsumeContext>();
+
+            if (consumeContext != null)
+                return clientFactory.CreateRequestClient<T>(consumeContext, timeout);
+
+            return new ClientFactory(new ScopedClientFactoryContext<IContainer>(clientFactory, context.GetInstance<IContainer>()))
+                .CreateRequestClient<T>(timeout);
+        }
+
+        IRequestClient<T> CreateRequestClient<T>(Uri destinationAddress, RequestTimeout timeout, IContext context)
+            where T : class
+        {
+            var clientFactory = GetClientFactory(context);
+            var consumeContext = context.TryGetInstance<ConsumeContext>();
+
+            if (consumeContext != null)
+                return clientFactory.CreateRequestClient<T>(consumeContext, destinationAddress, timeout);
+
+            return new ClientFactory(new ScopedClientFactoryContext<IContainer>(clientFactory, context.GetInstance<IContainer>()))
+                .CreateRequestClient<T>(destinationAddress, timeout);
         }
 
         IExecuteActivityScopeProvider<TActivity, TArguments> CreateExecuteActivityScopeProvider<TActivity, TArguments>(IContext context)
-            where TActivity : class, ExecuteActivity<TArguments>
+            where TActivity : class, IExecuteActivity<TArguments>
             where TArguments : class
         {
             return new StructureMapExecuteActivityScopeProvider<TActivity, TArguments>(context.GetInstance<IContainer>());
         }
 
         ICompensateActivityScopeProvider<TActivity, TLog> CreateCompensateActivityScopeProvider<TActivity, TLog>(IContext context)
-            where TActivity : class, CompensateActivity<TLog>
+            where TActivity : class, ICompensateActivity<TLog>
             where TLog : class
         {
             return new StructureMapCompensateActivityScopeProvider<TActivity, TLog>(context.GetInstance<IContainer>());
+        }
+
+        protected virtual IClientFactory GetClientFactory(IContext context)
+        {
+            return context.GetInstance<IClientFactory>();
+        }
+    }
+
+
+    public class StructureMapContainerMediatorRegistrar :
+        StructureMapContainerRegistrar
+    {
+        public StructureMapContainerMediatorRegistrar(ConfigurationExpression expression)
+            : base(expression)
+        {
+        }
+
+        protected override IClientFactory GetClientFactory(IContext context)
+        {
+            return context.GetInstance<IMediator>();
         }
     }
 }

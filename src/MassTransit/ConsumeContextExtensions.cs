@@ -1,57 +1,131 @@
-﻿// Copyright 2007-2016 Chris Patterson, Dru Sellers, Travis Smith, et. al.
-//  
-// Licensed under the Apache License, Version 2.0 (the "License"); you may not use
-// this file except in compliance with the License. You may obtain a copy of the 
-// License at 
-// 
-//     http://www.apache.org/licenses/LICENSE-2.0 
-// 
-// Unless required by applicable law or agreed to in writing, software distributed
-// under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR 
-// CONDITIONS OF ANY KIND, either express or implied. See the License for the 
-// specific language governing permissions and limitations under the License.
-namespace MassTransit
+﻿namespace MassTransit
 {
     using System;
     using System.Collections.Generic;
     using System.Threading.Tasks;
     using Context;
     using GreenPipes;
-    using GreenPipes.Payloads;
+    using GreenPipes.Internals.Extensions;
 
 
     public static class ConsumeContextExtensions
     {
-        public static ConsumerConsumeContext<TConsumer, T> PushConsumer<TConsumer, T>(this ConsumeContext<T> context, TConsumer consumer)
+        /// <summary>
+        /// Returns the endpoint for a fault, either directly to the requester, or published
+        /// </summary>
+        /// <param name="context"></param>
+        /// <typeparam name="T">The message type</typeparam>
+        /// <returns></returns>
+        public static Task<ISendEndpoint> GetFaultEndpoint<T>(this ConsumeContext context)
             where T : class
-            where TConsumer : class
         {
-            return new ConsumerConsumeContextProxy<TConsumer, T>(context, new PayloadCacheScope(context), consumer);
+            var destinationAddress = context.FaultAddress ?? context.ResponseAddress;
+
+            return GetEndpoint<Fault<T>>(context.ReceiveContext, context, destinationAddress, context.RequestId);
         }
 
-        public static ConsumerConsumeContext<TConsumer, TMessage> PushConsumerScope<TConsumer, TMessage, T>(this ConsumeContext<TMessage> context,
-            TConsumer consumer,
-            T scope)
-            where TMessage : class
-            where TConsumer : class
+        /// <summary>
+        /// Returns the endpoint for a fault, either directly to the requester, or published
+        /// </summary>
+        /// <param name="context"></param>
+        /// <param name="faultAddress"></param>
+        /// <param name="requestId"></param>
+        /// <typeparam name="T">The response type</typeparam>
+        /// <returns></returns>
+        public static Task<ISendEndpoint> GetFaultEndpoint<T>(this ConsumeContext context, Uri faultAddress, Guid? requestId = default)
             where T : class
         {
-            var proxy = new ConsumerConsumeContextProxy<TConsumer, TMessage>(context, new PayloadCacheScope(context), consumer);
+            var destinationAddress = faultAddress ?? context.FaultAddress ?? context.ResponseAddress;
 
-            proxy.GetOrAddPayload(() => scope);
-
-            return proxy;
+            return GetEndpoint<T>(context.ReceiveContext, context, destinationAddress, requestId ?? context.RequestId);
         }
 
-        public static ConsumeContext<T> CreateScope<T, TScope>(this ConsumeContext<T> context, TScope scope)
-            where T : class
-            where TScope : class
+        /// <summary>
+        /// Returns the endpoint for a receive fault, either directly to the requester, or published
+        /// </summary>
+        /// <param name="context"></param>
+        /// <param name="consumeContext"></param>
+        /// <param name="requestId"></param>
+        /// <returns></returns>
+        public static Task<ISendEndpoint> GetReceiveFaultEndpoint(this ReceiveContext context, ConsumeContext consumeContext, Guid? requestId)
         {
-            var proxy = new ConsumeContextProxy<T>(context, new PayloadCacheScope(context));
+            var destinationAddress = consumeContext?.FaultAddress ?? consumeContext?.ResponseAddress;
 
-            proxy.GetOrAddPayload(() => scope);
+            return GetEndpoint<ReceiveFault>(context, consumeContext, destinationAddress, requestId);
+        }
 
-            return proxy;
+        /// <summary>
+        /// Returns the endpoint for a response, either directly to the requester, or published
+        /// </summary>
+        /// <param name="context"></param>
+        /// <typeparam name="T"></typeparam>
+        /// <returns></returns>
+        public static Task<ISendEndpoint> GetResponseEndpoint<T>(this ConsumeContext context)
+            where T : class
+        {
+            return GetEndpoint<T>(context.ReceiveContext, context, context.ResponseAddress, context.RequestId);
+        }
+
+        /// <summary>
+        /// Returns the endpoint for a response, either directly to the requester, or published
+        /// </summary>
+        /// <param name="context"></param>
+        /// <param name="responseAddress"></param>
+        /// <param name="requestId"></param>
+        /// <typeparam name="T">The response type</typeparam>
+        /// <returns></returns>
+        public static Task<ISendEndpoint> GetResponseEndpoint<T>(this ConsumeContext context, Uri responseAddress, Guid? requestId = default)
+            where T : class
+        {
+            return GetEndpoint<T>(context.ReceiveContext, context, responseAddress ?? context.ResponseAddress, requestId ?? context.RequestId);
+        }
+
+        /// <summary>
+        /// Returns the endpoint for a response, either directly to the requester, or published
+        /// </summary>
+        /// <param name="receiveContext"></param>
+        /// <param name="consumeContext"></param>
+        /// <param name="destinationAddress"></param>
+        /// <param name="requestId"></param>
+        /// <typeparam name="T"></typeparam>
+        /// <returns></returns>
+        static Task<ISendEndpoint> GetEndpoint<T>(ReceiveContext receiveContext, ConsumeContext consumeContext, Uri destinationAddress, Guid? requestId)
+            where T : class
+        {
+            if (destinationAddress != null && consumeContext != null)
+            {
+                Task<ISendEndpoint> sendEndpointTask = receiveContext.SendEndpointProvider.GetSendEndpoint(destinationAddress);
+                if (sendEndpointTask.IsCompletedSuccessfully())
+                    return Task.FromResult<ISendEndpoint>(new ConsumeSendEndpoint(sendEndpointTask.Result, consumeContext, requestId));
+
+                async Task<ISendEndpoint> GetResponseEndpointAsync()
+                {
+                    var sendEndpoint = await sendEndpointTask.ConfigureAwait(false);
+
+                    return new ConsumeSendEndpoint(sendEndpoint, consumeContext, requestId);
+                }
+
+                return GetResponseEndpointAsync();
+            }
+
+            Task<ISendEndpoint> publishSendEndpointTask = receiveContext.PublishEndpointProvider.GetPublishSendEndpoint<T>();
+            if (publishSendEndpointTask.IsCompletedSuccessfully())
+            {
+                return consumeContext != null
+                    ? Task.FromResult<ISendEndpoint>(new ConsumeSendEndpoint(publishSendEndpointTask.Result, consumeContext, requestId))
+                    : publishSendEndpointTask;
+            }
+
+            async Task<ISendEndpoint> GetPublishSendEndpointAsync()
+            {
+                var publishSendEndpoint = await publishSendEndpointTask.ConfigureAwait(false);
+
+                return consumeContext != null
+                    ? new ConsumeSendEndpoint(publishSendEndpoint, consumeContext, requestId)
+                    : publishSendEndpoint;
+            }
+
+            return GetPublishSendEndpointAsync();
         }
 
         public static Task Forward<T>(this ConsumeContext<T> context, ISendEndpoint endpoint)

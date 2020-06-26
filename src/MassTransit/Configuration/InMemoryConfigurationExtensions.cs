@@ -1,18 +1,7 @@
-﻿// Copyright 2007-2016 Chris Patterson, Dru Sellers, Travis Smith, et. al.
-//  
-// Licensed under the Apache License, Version 2.0 (the "License"); you may not use
-// this file except in compliance with the License. You may obtain a copy of the 
-// License at 
-// 
-//     http://www.apache.org/licenses/LICENSE-2.0 
-// 
-// Unless required by applicable law or agreed to in writing, software distributed
-// under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR 
-// CONDITIONS OF ANY KIND, either express or implied. See the License for the 
-// specific language governing permissions and limitations under the License.
-namespace MassTransit
+﻿namespace MassTransit
 {
     using System;
+    using Transports.InMemory.Configuration;
 
 
     public static class InMemoryConfigurationExtensions
@@ -38,6 +27,29 @@ namespace MassTransit
         public static IBusControl CreateUsingInMemory(this IBusFactorySelector selector, Uri baseAddress, Action<IInMemoryBusFactoryConfigurator> configure)
         {
             return InMemoryBus.Create(baseAddress, configure);
+        }
+
+        /// <summary>
+        /// Configure MassTransit to use the In-Memory transport.
+        /// </summary>
+        /// <param name="configurator">The registration configurator (configured via AddMassTransit)</param>
+        /// <param name="configure">The configuration callback for the bus factory</param>
+        public static void UsingInMemory(this IBusRegistrationConfigurator configurator,
+            Action<IBusRegistrationContext, IInMemoryBusFactoryConfigurator> configure = null)
+        {
+            UsingInMemory(configurator, null, configure);
+        }
+
+        /// <summary>
+        /// Configure MassTransit to use the In-Memory transport.
+        /// </summary>
+        /// <param name="configurator">The registration configurator (configured via AddMassTransit)</param>
+        /// <param name="baseAddress">The base Address of the transport</param>
+        /// <param name="configure">The configuration callback for the bus factory</param>
+        public static void UsingInMemory(this IBusRegistrationConfigurator configurator, Uri baseAddress,
+            Action<IBusRegistrationContext, IInMemoryBusFactoryConfigurator> configure = null)
+        {
+            configurator.SetBusFactory(new InMemoryRegistrationBusFactory(baseAddress, configure));
         }
     }
 }

@@ -1,18 +1,7 @@
-// Copyright 2007-2019 Chris Patterson, Dru Sellers, Travis Smith, et. al.
-//
-// Licensed under the Apache License, Version 2.0 (the "License"); you may not use
-// this file except in compliance with the License. You may obtain a copy of the
-// License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software distributed
-// under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
-// CONDITIONS OF ANY KIND, either express or implied. See the License for the
-// specific language governing permissions and limitations under the License.
 namespace MassTransit.Registration
 {
     using System;
+    using Automatonymous;
     using Courier;
     using Definition;
     using Saga;
@@ -37,6 +26,21 @@ namespace MassTransit.Registration
         {
         }
 
+        public void RegisterSagaStateMachine<TStateMachine, TInstance>()
+            where TStateMachine : class, SagaStateMachine<TInstance>
+            where TInstance : class, SagaStateMachineInstance
+        {
+        }
+
+        public void RegisterSagaRepository<TSaga>(Func<IConfigurationServiceProvider, ISagaRepository<TSaga>> repositoryFactory)
+            where TSaga : class, ISaga
+        {
+        }
+
+        void IContainerRegistrar.RegisterSagaRepository<TSaga, TContext, TConsumeContextFactory, TRepositoryContextFactory>()
+        {
+        }
+
         public void RegisterSagaDefinition<TDefinition, TSaga>()
             where TDefinition : class, ISagaDefinition<TSaga>
             where TSaga : class, ISaga
@@ -44,14 +48,20 @@ namespace MassTransit.Registration
         }
 
         public void RegisterExecuteActivity<TActivity, TArguments>()
-            where TActivity : class, ExecuteActivity<TArguments>
+            where TActivity : class, IExecuteActivity<TArguments>
             where TArguments : class
+        {
+        }
+
+        public void RegisterCompensateActivity<TActivity, TLog>()
+            where TActivity : class, ICompensateActivity<TLog>
+            where TLog : class
         {
         }
 
         public void RegisterActivityDefinition<TDefinition, TActivity, TArguments, TLog>()
             where TDefinition : class, IActivityDefinition<TActivity, TArguments, TLog>
-            where TActivity : class, Activity<TArguments, TLog>
+            where TActivity : class, IActivity<TArguments, TLog>
             where TArguments : class
             where TLog : class
         {
@@ -59,7 +69,7 @@ namespace MassTransit.Registration
 
         public void RegisterExecuteActivityDefinition<TDefinition, TActivity, TArguments>()
             where TDefinition : class, IExecuteActivityDefinition<TActivity, TArguments>
-            where TActivity : class, ExecuteActivity<TArguments>
+            where TActivity : class, IExecuteActivity<TArguments>
             where TArguments : class
         {
         }
@@ -80,9 +90,24 @@ namespace MassTransit.Registration
         {
         }
 
-        public void RegisterCompensateActivity<TActivity, TLog>()
-            where TActivity : class, CompensateActivity<TLog>
-            where TLog : class
+        public void Register<T, TImplementation>()
+            where T : class
+            where TImplementation : class, T
+        {
+        }
+
+        public void Register<T>(Func<IConfigurationServiceProvider, T> factoryMethod)
+            where T : class
+        {
+        }
+
+        public void RegisterSingleInstance<T>(Func<IConfigurationServiceProvider, T> factoryMethod)
+            where T : class
+        {
+        }
+
+        public void RegisterSingleInstance<T>(T instance)
+            where T : class
         {
         }
     }

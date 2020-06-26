@@ -1,38 +1,25 @@
-﻿// Copyright 2007-2017 Chris Patterson, Dru Sellers, Travis Smith, et. al.
-//  
-// Licensed under the Apache License, Version 2.0 (the "License"); you may not use
-// this file except in compliance with the License. You may obtain a copy of the 
-// License at 
-// 
-//     http://www.apache.org/licenses/LICENSE-2.0 
-// 
-// Unless required by applicable law or agreed to in writing, software distributed
-// under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR 
-// CONDITIONS OF ANY KIND, either express or implied. See the License for the 
-// specific language governing permissions and limitations under the License.
-namespace MassTransit.Context
+﻿namespace MassTransit.Context
 {
     using System;
     using System.Collections.Generic;
     using System.Linq;
     using System.Threading.Tasks;
     using GreenPipes;
-    using GreenPipes.Payloads;
+    using Metadata;
     using Util;
 
 
     public class RetryConsumeContext :
-        ConsumeContextProxy,
+        ConsumeContextScope,
         ConsumeRetryContext
     {
-        readonly IRetryPolicy _retryPolicy;
         readonly ConsumeContext _context;
         readonly IList<PendingFault> _pendingFaults;
 
         public RetryConsumeContext(ConsumeContext context, IRetryPolicy retryPolicy, RetryContext retryContext)
-            : base(context, new PayloadCacheScope(context))
+            : base(context)
         {
-            _retryPolicy = retryPolicy;
+            RetryPolicy = retryPolicy;
             _context = context;
 
             if (retryContext != null)
@@ -44,13 +31,26 @@ namespace MassTransit.Context
             _pendingFaults = new List<PendingFault>();
         }
 
+        protected IRetryPolicy RetryPolicy { get; }
+
         public int RetryAttempt { get; }
 
         public int RetryCount { get; }
 
+        public virtual TContext CreateNext<TContext>(RetryContext retryContext)
+            where TContext : class, ConsumeRetryContext
+        {
+            throw new InvalidOperationException("This is only supported by a derived type");
+        }
+
+        public Task NotifyPendingFaults()
+        {
+            return Task.WhenAll(_pendingFaults.Select(x => x.Notify(_context)));
+        }
+
         public override Task NotifyFaulted<T>(ConsumeContext<T> context, TimeSpan duration, string consumerType, Exception exception)
         {
-            if (_retryPolicy.IsHandled(exception))
+            if (RetryPolicy.IsHandled(exception))
             {
                 _pendingFaults.Add(new PendingFault<T>(context, duration, consumerType, exception));
                 return TaskUtil.Completed;
@@ -61,20 +61,7 @@ namespace MassTransit.Context
 
         public RetryConsumeContext CreateNext(RetryContext retryContext)
         {
-            return new RetryConsumeContext(_context, _retryPolicy, retryContext);
-        }
-
-        protected IRetryPolicy RetryPolicy => _retryPolicy;
-
-        public virtual TContext CreateNext<TContext>(RetryContext retryContext)
-            where TContext : RetryConsumeContext
-        {
-            throw new InvalidOperationException("This is only supported by a derived type");
-        }
-
-        public Task NotifyPendingFaults()
-        {
-            return Task.WhenAll(_pendingFaults.Select(x => x.Notify(_context)));
+            return new RetryConsumeContext(_context, RetryPolicy, retryContext);
         }
 
 

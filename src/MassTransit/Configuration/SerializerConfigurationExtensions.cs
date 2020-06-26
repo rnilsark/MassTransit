@@ -1,15 +1,3 @@
-// Copyright 2007-2016 Chris Patterson, Dru Sellers, Travis Smith, et. al.
-//  
-// Licensed under the Apache License, Version 2.0 (the "License"); you may not use
-// this file except in compliance with the License. You may obtain a copy of the 
-// License at 
-// 
-//     http://www.apache.org/licenses/LICENSE-2.0 
-// 
-// Unless required by applicable law or agreed to in writing, software distributed
-// under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR 
-// CONDITIONS OF ANY KIND, either express or implied. See the License for the 
-// specific language governing permissions and limitations under the License.
 namespace MassTransit
 {
     using System;
@@ -60,6 +48,28 @@ namespace MassTransit
         }
 
         /// <summary>
+        /// Configure the serialization settings used to create the BSON message serializer
+        /// </summary>
+        /// <param name="configurator"></param>
+        /// <param name="configure"></param>
+        public static void ConfigureBsonSerializer(this IBusFactoryConfigurator configurator,
+            Func<JsonSerializerSettings, JsonSerializerSettings> configure)
+        {
+            BsonMessageSerializer.SerializerSettings = configure(BsonMessageSerializer.SerializerSettings);
+        }
+
+        /// <summary>
+        /// Configure the serialization settings used to create the BSON message deserializer
+        /// </summary>
+        /// <param name="configurator"></param>
+        /// <param name="configure"></param>
+        public static void ConfigureBsonDeserializer(this IBusFactoryConfigurator configurator,
+            Func<JsonSerializerSettings, JsonSerializerSettings> configure)
+        {
+            BsonMessageSerializer.DeserializerSettings = configure(BsonMessageSerializer.DeserializerSettings);
+        }
+
+        /// <summary>
         /// Serialize messages using the BSON message serializer
         /// </summary>
         /// <param name="configurator"></param>
@@ -75,6 +85,30 @@ namespace MassTransit
         public static void UseBsonSerializer(this IReceiveEndpointConfigurator configurator)
         {
             configurator.SetMessageSerializer(() => new BsonMessageSerializer());
+        }
+
+        /// <summary>
+        /// Serialize messages using the raw JSON message serializer
+        /// </summary>
+        /// <param name="configurator"></param>
+        public static void UseRawJsonSerializer(this IBusFactoryConfigurator configurator)
+        {
+            configurator.SetMessageSerializer(() => new RawJsonMessageSerializer());
+
+            configurator.AddMessageDeserializer(RawJsonMessageSerializer.RawJsonContentType,
+                () => new RawJsonMessageDeserializer(RawJsonMessageSerializer.Deserializer));
+        }
+
+        /// <summary>
+        /// Serialize messages using the raw JSON message serializer
+        /// </summary>
+        /// <param name="configurator"></param>
+        public static void UseRawJsonSerializer(this IReceiveEndpointConfigurator configurator)
+        {
+            configurator.SetMessageSerializer(() => new RawJsonMessageSerializer());
+
+            configurator.AddMessageDeserializer(RawJsonMessageSerializer.RawJsonContentType,
+                () => new RawJsonMessageDeserializer(RawJsonMessageSerializer.Deserializer));
         }
 
         public static void UseEncryptedSerializer(this IBusFactoryConfigurator configurator, ICryptoStreamProvider streamProvider)
@@ -97,7 +131,9 @@ namespace MassTransit
         /// Serialize messages using the BSON message serializer with AES Encryption
         /// </summary>
         /// <param name="configurator"></param>
-        /// <param name="symmetricKey">Cryptographic key for both encryption of plaintext message and decryption of ciphertext message</param>
+        /// <param name="symmetricKey">
+        /// Cryptographic key for both encryption of plaintext message and decryption of ciphertext message
+        /// </param>
         public static void UseEncryption(this IBusFactoryConfigurator configurator, byte[] symmetricKey)
         {
             var keyProvider = new ConstantSecureKeyProvider(symmetricKey);
@@ -110,7 +146,9 @@ namespace MassTransit
         /// Serialize messages using the BSON message serializer with AES Encryption
         /// </summary>
         /// <param name="configurator"></param>
-        /// <param name="symmetricKey">Cryptographic key for both encryption of plaintext message and decryption of ciphertext message</param>
+        /// <param name="symmetricKey">
+        /// Cryptographic key for both encryption of plaintext message and decryption of ciphertext message
+        /// </param>
         public static void UseEncryption(this IReceiveEndpointConfigurator configurator, byte[] symmetricKey)
         {
             var keyProvider = new ConstantSecureKeyProvider(symmetricKey);
@@ -123,7 +161,9 @@ namespace MassTransit
         /// Serialize messages using the BSON message serializer with AES Encryption
         /// </summary>
         /// <param name="configurator"></param>
-        /// <param name="keyProvider">The custom key provider to provide the symmetric key for encryption of plaintext message and decryption of ciphertext message</param>
+        /// <param name="keyProvider">
+        /// The custom key provider to provide the symmetric key for encryption of plaintext message and decryption of ciphertext message
+        /// </param>
         public static void UseEncryption(this IBusFactoryConfigurator configurator, ISecureKeyProvider keyProvider)
         {
             var streamProvider = new AesCryptoStreamProviderV2(keyProvider);
@@ -135,7 +175,9 @@ namespace MassTransit
         /// Serialize messages using the BSON message serializer with AES Encryption
         /// </summary>
         /// <param name="configurator"></param>
-        /// <param name="keyProvider">The custom key provider to provide the symmetric key for encryption of plaintext message and decryption of ciphertext message</param>
+        /// <param name="keyProvider">
+        /// The custom key provider to provide the symmetric key for encryption of plaintext message and decryption of ciphertext message
+        /// </param>
         public static void UseEncryption(this IReceiveEndpointConfigurator configurator, ISecureKeyProvider keyProvider)
         {
             var streamProvider = new AesCryptoStreamProviderV2(keyProvider);
@@ -186,52 +228,5 @@ namespace MassTransit
         {
             configurator.SetMessageSerializer(() => new XmlMessageSerializer());
         }
-        
-
-    #if !NETCORE
-        /// <summary>
-        /// Serialize message using the .NET binary formatter (also adds support for the binary deserializer)
-        /// </summary>
-        /// <param name="configurator"></param>
-        public static void UseBinarySerializer(this IBusFactoryConfigurator configurator)
-        {
-            configurator.SetMessageSerializer(() => new BinaryMessageSerializer());
-
-            configurator.SupportBinaryMessageDeserializer();
-        }
-
-        /// <summary>
-        /// Serialize message using the .NET binary formatter (also adds support for the binary deserializer)
-        /// </summary>
-        /// <param name="configurator"></param>
-        public static void UseBinarySerializer(this IReceiveEndpointConfigurator configurator)
-        {
-            configurator.SetMessageSerializer(() => new BinaryMessageSerializer());
-
-            configurator.SupportBinaryMessageDeserializer();
-        }
-
-        /// <summary>
-        /// Add support for the binary message deserializer to the bus. This serializer is not supported
-        /// by default.
-        /// </summary>
-        /// <param name="configurator"></param>
-        /// <returns></returns>
-        public static void SupportBinaryMessageDeserializer(this IBusFactoryConfigurator configurator)
-        {
-            configurator.AddMessageDeserializer(BinaryMessageSerializer.BinaryContentType, () => new BinaryMessageDeserializer());
-        }
-
-        /// <summary>
-        /// Add support for the binary message deserializer to the bus. This serializer is not supported
-        /// by default.
-        /// </summary>
-        /// <param name="configurator"></param>
-        /// <returns></returns>
-        public static void SupportBinaryMessageDeserializer(this IReceiveEndpointConfigurator configurator)
-        {
-            configurator.AddMessageDeserializer(BinaryMessageSerializer.BinaryContentType, () => new BinaryMessageDeserializer());
-        }
-    #endif
     }
 }

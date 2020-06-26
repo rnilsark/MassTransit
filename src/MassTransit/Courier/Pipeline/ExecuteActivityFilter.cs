@@ -1,20 +1,10 @@
-﻿// Copyright 2007-2016 Chris Patterson, Dru Sellers, Travis Smith, et. al.
-//  
-// Licensed under the Apache License, Version 2.0 (the "License"); you may not use
-// this file except in compliance with the License. You may obtain a copy of the 
-// License at 
-// 
-//     http://www.apache.org/licenses/LICENSE-2.0 
-// 
-// Unless required by applicable law or agreed to in writing, software distributed
-// under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR 
-// CONDITIONS OF ANY KIND, either express or implied. See the License for the 
-// specific language governing permissions and limitations under the License.
-namespace MassTransit.Courier.Pipeline
+﻿namespace MassTransit.Courier.Pipeline
 {
+    using System;
     using System.Threading.Tasks;
+    using Exceptions;
     using GreenPipes;
-    using Logging;
+    using Internals.Extensions;
 
 
     /// <summary>
@@ -23,28 +13,50 @@ namespace MassTransit.Courier.Pipeline
     /// <typeparam name="TArguments"></typeparam>
     /// <typeparam name="TActivity"></typeparam>
     public class ExecuteActivityFilter<TActivity, TArguments> :
-        IFilter<RequestContext<ExecuteActivityContext<TActivity, TArguments>>>
-        where TActivity : class, ExecuteActivity<TArguments>
+        IFilter<ExecuteActivityContext<TActivity, TArguments>>
+        where TActivity : class, IExecuteActivity<TArguments>
         where TArguments : class
     {
-        static readonly ILog _log = Logger.Get<ExecuteActivityFilter<TActivity, TArguments>>();
+        readonly ActivityObservable _observers;
+
+        public ExecuteActivityFilter(ActivityObservable observers)
+        {
+            _observers = observers;
+        }
 
         void IProbeSite.Probe(ProbeContext context)
         {
             context.CreateFilterScope("execute");
         }
 
-        public async Task Send(RequestContext<ExecuteActivityContext<TActivity, TArguments>> context,
-            IPipe<RequestContext<ExecuteActivityContext<TActivity, TArguments>>> next)
+        public async Task Send(ExecuteActivityContext<TActivity, TArguments> context, IPipe<ExecuteActivityContext<TActivity, TArguments>> next)
         {
-            if (_log.IsDebugEnabled)
-                _log.DebugFormat("Executing: {0}", context.Request.TrackingNumber);
+            try
+            {
+                if (_observers.Count > 0)
+                    await _observers.PreExecute(context).ConfigureAwait(false);
 
-            var result = await context.Request.Activity.Execute(context.Request).ConfigureAwait(false);
+                var result = context.Result = await context.Activity.Execute(context).ConfigureAwait(false)
+                    ?? context.Faulted(new ActivityExecutionException("The activity execute did not return a result"));
 
-            context.TrySetResult(result);
+                if (result.IsFaulted(out var exception))
+                    exception.Rethrow();
 
-            await next.Send(context).ConfigureAwait(false);
+                await next.Send(context).ConfigureAwait(false);
+
+                if (_observers.Count > 0)
+                    await _observers.PostExecute(context).ConfigureAwait(false);
+            }
+            catch (Exception exception)
+            {
+                if (context.Result == null || !context.Result.IsFaulted(out var faultException) || faultException != exception)
+                    context.Result = context.Faulted(exception);
+
+                if (_observers.Count > 0)
+                    await _observers.ExecuteFault(context, exception).ConfigureAwait(false);
+
+                throw;
+            }
         }
     }
 }

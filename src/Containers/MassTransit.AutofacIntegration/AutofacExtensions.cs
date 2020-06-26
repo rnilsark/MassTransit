@@ -1,99 +1,19 @@
-﻿// Copyright 2007-2017 Chris Patterson, Dru Sellers, Travis Smith, et. al.
-//  
-// Licensed under the Apache License, Version 2.0 (the "License"); you may not use
-// this file except in compliance with the License. You may obtain a copy of the 
-// License at 
-// 
-//     http://www.apache.org/licenses/LICENSE-2.0 
-// 
-// Unless required by applicable law or agreed to in writing, software distributed
-// under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR 
-// CONDITIONS OF ANY KIND, either express or implied. See the License for the 
-// specific language governing permissions and limitations under the License.
-namespace MassTransit
+﻿namespace MassTransit
 {
     using System;
-    using System.Collections.Generic;
-    using System.Linq;
     using System.Linq.Expressions;
     using Autofac;
     using Autofac.Builder;
-    using Autofac.Core;
     using AutofacIntegration;
-    using AutofacIntegration.Registration;
     using AutofacIntegration.ScopeProviders;
     using GreenPipes;
     using GreenPipes.Specifications;
     using Internals.Extensions;
     using Pipeline.Filters;
-    using Registration;
-    using Saga;
-    using Scoping;
 
 
     public static class AutofacExtensions
     {
-        /// <summary>
-        /// Load the consumer configuration from the specified Autofac LifetimeScope
-        /// </summary>
-        /// <param name="configurator"></param>
-        /// <param name="scope">The LifetimeScope of the container</param>
-        /// <param name="name">The name to use for the scope created for each message</param>
-        /// <param name="configureScope">Configuration for scope container</param>
-        [Obsolete("LoadFrom is not recommended, review the documentation and use the Consumer methods for your container instead.")]
-        public static void LoadFrom(this IReceiveEndpointConfigurator configurator, ILifetimeScope scope, string name = "message",
-            Action<ContainerBuilder, ConsumeContext> configureScope = null)
-        {
-            var registration = scope.ResolveOptional<IRegistration>();
-            if (registration != null)
-            {
-                registration.ConfigureConsumers(configurator);
-                registration.ConfigureSagas(configurator);
-
-                return;
-            }
-
-            var lifetimeScopeProvider = new SingleLifetimeScopeProvider(scope);
-
-            IConsumerScopeProvider scopeProvider = new AutofacConsumerScopeProvider(lifetimeScopeProvider, name, configureScope);
-
-            IList<Type> concreteTypes = FindTypes(scope, r => !r.HasInterface<ISaga>(), typeof(IConsumer));
-            if (concreteTypes.Count > 0)
-                foreach (var concreteType in concreteTypes)
-                    ConsumerConfiguratorCache.Configure(concreteType, configurator, scopeProvider);
-
-            var sagaRepositoryFactory = new AutofacSagaRepositoryFactory(lifetimeScopeProvider, name, configureScope);
-
-            IList<Type> sagaTypes = FindTypes(scope, x => true, typeof(ISaga));
-            if (sagaTypes.Count > 0)
-                foreach (var sagaType in sagaTypes)
-                    SagaConfiguratorCache.Configure(sagaType, configurator, sagaRepositoryFactory);
-        }
-
-        /// <summary>
-        /// Load the consumer configuration from the specified Autofac LifetimeScope
-        /// </summary>
-        /// <param name="configurator"></param>
-        /// <param name="context">The component context of the container</param>
-        /// <param name="name">The name to use for the scope created for each message</param>
-        /// <param name="configureScope">Configuration for scope container</param>
-        [Obsolete(
-            "This method is not recommended, since it may load multiple consumers into a single receive endpoint. Review the documentation and use the Consumer methods for your container instead.")]
-        public static void LoadFrom(this IReceiveEndpointConfigurator configurator, IComponentContext context, string name = "message",
-            Action<ContainerBuilder, ConsumeContext> configureScope = null)
-        {
-            var registration = context.ResolveOptional<IRegistration>();
-            if (registration != null)
-            {
-                registration.ConfigureConsumers(configurator);
-                registration.ConfigureSagas(configurator);
-
-                return;
-            }
-
-            LoadFrom(configurator, context.Resolve<ILifetimeScope>(), name, configureScope);
-        }
-
         /// <summary>
         /// Creates a lifetime scope which is shared by any downstream filters (rather than creating a new one).
         /// </summary>
@@ -105,7 +25,7 @@ namespace MassTransit
             Action<ContainerBuilder, ConsumeContext> configureScope = null)
         {
             var scopeProvider = new AutofacConsumerScopeProvider(new SingleLifetimeScopeProvider(lifetimeScope), name, configureScope);
-            var specification = new FilterPipeSpecification<ConsumeContext>(new ScopeFilter(scopeProvider));
+            var specification = new FilterPipeSpecification<ConsumeContext>(new ScopeConsumeFilter(scopeProvider));
 
             configurator.AddPipeSpecification(specification);
         }
@@ -119,6 +39,7 @@ namespace MassTransit
         /// <param name="propertyExpression"></param>
         public static IRegistrationBuilder<ILifetimeScopeIdAccessor<TInput, T>, ConcreteReflectionActivatorData, SingleRegistrationStyle>
             RegisterLifetimeScopeIdAccessor<TInput, T>(this ContainerBuilder builder, Expression<Func<TInput, T>> propertyExpression)
+            where TInput : class
         {
             if (propertyExpression == null)
                 throw new ArgumentNullException(nameof(propertyExpression));
@@ -144,16 +65,6 @@ namespace MassTransit
                 .As<ILifetimeScopeRegistry<string>>()
                 .WithParameter("tag", scopeTag)
                 .SingleInstance();
-        }
-
-        public static IList<Type> FindTypes(IComponentContext scope, Func<Type, bool> filter, Type interfaceType)
-        {
-            return scope.ComponentRegistry.Registrations
-                .SelectMany(r => r.Services.OfType<IServiceWithType>(), (r, s) => new {r, s})
-                .Where(rs => rs.s.ServiceType.HasInterface(interfaceType))
-                .Select(rs => rs.s.ServiceType)
-                .Where(filter)
-                .ToList();
         }
     }
 }

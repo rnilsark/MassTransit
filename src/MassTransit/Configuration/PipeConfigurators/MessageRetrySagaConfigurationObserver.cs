@@ -2,6 +2,7 @@ namespace MassTransit.PipeConfigurators
 {
     using System;
     using System.Threading;
+    using Automatonymous;
     using Context;
     using GreenPipes;
     using GreenPipes.Configurators;
@@ -18,8 +19,8 @@ namespace MassTransit.PipeConfigurators
         ISagaConfigurationObserver
         where TSaga : class, ISaga
     {
-        readonly ISagaConfigurator<TSaga> _configurator;
         readonly CancellationToken _cancellationToken;
+        readonly ISagaConfigurator<TSaga> _configurator;
         readonly Action<IRetryConfigurator> _configure;
 
         public MessageRetrySagaConfigurationObserver(ISagaConfigurator<TSaga> configurator, CancellationToken cancellationToken,
@@ -31,6 +32,11 @@ namespace MassTransit.PipeConfigurators
         }
 
         void ISagaConfigurationObserver.SagaConfigured<T>(ISagaConfigurator<T> configurator)
+        {
+        }
+
+        public void StateMachineSagaConfigured<TInstance>(ISagaConfigurator<TInstance> configurator, SagaStateMachine<TInstance> stateMachine)
+            where TInstance : class, ISaga, SagaStateMachineInstance
         {
         }
 

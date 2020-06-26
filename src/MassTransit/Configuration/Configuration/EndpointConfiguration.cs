@@ -1,21 +1,12 @@
-﻿// Copyright 2007-2018 Chris Patterson, Dru Sellers, Travis Smith, et. al.
-//  
-// Licensed under the Apache License, Version 2.0 (the "License"); you may not use
-// this file except in compliance with the License. You may obtain a copy of the 
-// License at 
-// 
-//     http://www.apache.org/licenses/LICENSE-2.0 
-// 
-// Unless required by applicable law or agreed to in writing, software distributed
-// under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR 
-// CONDITIONS OF ANY KIND, either express or implied. See the License for the 
-// specific language governing permissions and limitations under the License.
-namespace MassTransit.Configuration
+﻿namespace MassTransit.Configuration
 {
     using System;
     using System.Collections.Generic;
     using System.Linq;
+    using System.Net.Mime;
+    using Automatonymous;
     using ConsumeConfigurators;
+    using Courier;
     using GreenPipes;
     using Saga;
     using SagaConfigurators;
@@ -28,7 +19,7 @@ namespace MassTransit.Configuration
         {
             Topology = topology;
 
-            Consume = new ConsumePipeConfiguration();
+            Consume = new ConsumePipeConfiguration(topology.Consume);
             Send = new SendPipeConfiguration(topology.Send);
             Publish = new PublishPipeConfiguration(topology.Publish);
             Receive = new ReceivePipeConfiguration();
@@ -40,7 +31,7 @@ namespace MassTransit.Configuration
         {
             Topology = topology;
 
-            Consume = new ConsumePipeConfiguration();
+            Consume = new ConsumePipeConfiguration(busConfiguration.Consume.Specification);
             Send = new SendPipeConfiguration(busConfiguration.Send.Specification);
             Publish = new PublishPipeConfiguration(busConfiguration.Publish.Specification);
             Receive = new ReceivePipeConfiguration();
@@ -58,6 +49,23 @@ namespace MassTransit.Configuration
             Receive = new ReceivePipeConfiguration();
 
             Serialization = parentConfiguration.Serialization.CreateSerializationConfiguration();
+        }
+
+        protected EndpointConfiguration(IEndpointConfiguration endpointConfiguration)
+        {
+            Topology = endpointConfiguration.Topology;
+
+            Consume = endpointConfiguration.Consume;
+            Send = endpointConfiguration.Send;
+            Publish = endpointConfiguration.Publish;
+            Receive = endpointConfiguration.Receive;
+
+            Serialization = endpointConfiguration.Serialization;
+        }
+
+        public bool AutoStart
+        {
+            set => Consume.Configurator.AutoStart = value;
         }
 
         public void AddPipeSpecification(IPipeSpecification<ConsumeContext> specification)
@@ -102,6 +110,12 @@ namespace MassTransit.Configuration
             Consume.Configurator.SagaConfigured(configurator);
         }
 
+        public void StateMachineSagaConfigured<TInstance>(ISagaConfigurator<TInstance> configurator, SagaStateMachine<TInstance> stateMachine)
+            where TInstance : class, ISaga, SagaStateMachineInstance
+        {
+            Consume.Configurator.StateMachineSagaConfigured(configurator, stateMachine);
+        }
+
         public void SagaMessageConfigured<TSaga, TMessage>(ISagaMessageConfigurator<TSaga, TMessage> configurator)
             where TSaga : class, ISaga
             where TMessage : class
@@ -118,6 +132,33 @@ namespace MassTransit.Configuration
             where TMessage : class
         {
             Consume.Configurator.HandlerConfigured(configurator);
+        }
+
+        public ConnectHandle ConnectActivityConfigurationObserver(IActivityConfigurationObserver observer)
+        {
+            return Consume.Configurator.ConnectActivityConfigurationObserver(observer);
+        }
+
+        public void ActivityConfigured<TActivity, TArguments>(IExecuteActivityConfigurator<TActivity, TArguments> configurator,
+            Uri compensateAddress)
+            where TActivity : class, IExecuteActivity<TArguments>
+            where TArguments : class
+        {
+            Consume.Configurator.ActivityConfigured(configurator, compensateAddress);
+        }
+
+        public void ExecuteActivityConfigured<TActivity, TArguments>(IExecuteActivityConfigurator<TActivity, TArguments> configurator)
+            where TActivity : class, IExecuteActivity<TArguments>
+            where TArguments : class
+        {
+            Consume.Configurator.ExecuteActivityConfigured(configurator);
+        }
+
+        public void CompensateActivityConfigured<TActivity, TLog>(ICompensateActivityConfigurator<TActivity, TLog> configurator)
+            where TActivity : class, ICompensateActivity<TLog>
+            where TLog : class
+        {
+            Consume.Configurator.CompensateActivityConfigured(configurator);
         }
 
         public void ConfigurePublish(Action<IPublishPipeConfigurator> callback)
@@ -166,7 +207,8 @@ namespace MassTransit.Configuration
                 .Concat(Publish.Specification.Validate())
                 .Concat(Consume.Specification.Validate())
                 .Concat(Receive.Specification.Validate())
-                .Concat(Topology.Validate());
+                .Concat(Topology.Validate())
+                .Concat(Serialization.Validate());
         }
 
         public IConsumePipeConfiguration Consume { get; }
@@ -175,5 +217,20 @@ namespace MassTransit.Configuration
         public IReceivePipeConfiguration Receive { get; }
         public ITopologyConfiguration Topology { get; }
         public ISerializationConfiguration Serialization { get; }
+
+        public void SetMessageSerializer(SerializerFactory serializerFactory)
+        {
+            Serialization.SetSerializer(serializerFactory);
+        }
+
+        public void AddMessageDeserializer(ContentType contentType, DeserializerFactory deserializerFactory)
+        {
+            Serialization.AddDeserializer(contentType, deserializerFactory);
+        }
+
+        public void ClearMessageDeserializers()
+        {
+            Serialization.ClearDeserializers();
+        }
     }
 }

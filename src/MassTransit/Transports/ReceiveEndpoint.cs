@@ -1,15 +1,3 @@
-// Copyright 2007-2018 Chris Patterson, Dru Sellers, Travis Smith, et. al.
-//  
-// Licensed under the Apache License, Version 2.0 (the "License"); you may not use
-// this file except in compliance with the License. You may obtain a copy of the 
-// License at 
-// 
-//     http://www.apache.org/licenses/LICENSE-2.0 
-// 
-// Unless required by applicable law or agreed to in writing, software distributed
-// under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR 
-// CONDITIONS OF ANY KIND, either express or implied. See the License for the 
-// specific language governing permissions and limitations under the License.
 namespace MassTransit.Transports
 {
     using System;
@@ -18,36 +6,40 @@ namespace MassTransit.Transports
     using Context;
     using Events;
     using GreenPipes;
+    using GreenPipes.Internals.Extensions;
     using Pipeline;
+    using Util;
 
 
     /// <summary>
     /// A receive endpoint is called by the receive transport to push messages to consumers.
     /// The receive endpoint is where the initial deserialization occurs, as well as any additional
-    /// filters on the receive context. 
+    /// filters on the receive context.
     /// </summary>
     public class ReceiveEndpoint :
         IReceiveEndpointControl
     {
-        readonly IReceiveTransport _receiveTransport;
-        ConnectHandle _handle;
         readonly ReceiveEndpointContext _context;
+        readonly IReceiveTransport _receiveTransport;
+        readonly TaskCompletionSource<ReceiveEndpointReady> _started;
+        ConnectHandle _handle;
 
         public ReceiveEndpoint(IReceiveTransport receiveTransport, ReceiveEndpointContext context)
         {
             _context = context;
             _receiveTransport = receiveTransport;
 
+            _started = TaskUtil.GetTask<ReceiveEndpointReady>();
             _handle = receiveTransport.ConnectReceiveTransportObserver(new Observer(this, context.EndpointObservers));
         }
 
-        ReceiveEndpointContext IReceiveEndpoint.Context => _context;
+        public Task<ReceiveEndpointReady> Started => _started.Task;
 
         ReceiveEndpointHandle IReceiveEndpointControl.Start()
         {
             var transportHandle = _receiveTransport.Start();
 
-            return new Handle(transportHandle);
+            return new Handle(this, transportHandle, _context);
         }
 
         void IProbeSite.Probe(ProbeContext context)
@@ -59,7 +51,7 @@ namespace MassTransit.Transports
 
         ConnectHandle IReceiveObserverConnector.ConnectReceiveObserver(IReceiveObserver observer)
         {
-            return _receiveTransport.ConnectReceiveObserver(observer);
+            return _context.ConnectReceiveObserver(observer);
         }
 
         ConnectHandle IReceiveEndpointObserverConnector.ConnectReceiveEndpointObserver(IReceiveEndpointObserver observer)
@@ -89,12 +81,12 @@ namespace MassTransit.Transports
 
         ConnectHandle IPublishObserverConnector.ConnectPublishObserver(IPublishObserver observer)
         {
-            return _receiveTransport.ConnectPublishObserver(observer);
+            return _context.ConnectPublishObserver(observer);
         }
 
         ConnectHandle ISendObserverConnector.ConnectSendObserver(ISendObserver observer)
         {
-            return _receiveTransport.ConnectSendObserver(observer);
+            return _context.ConnectSendObserver(observer);
         }
 
         public Task<ISendEndpoint> GetSendEndpoint(Uri address)
@@ -102,15 +94,10 @@ namespace MassTransit.Transports
             return _context.SendEndpointProvider.GetSendEndpoint(address);
         }
 
-        public IPublishEndpoint CreatePublishEndpoint(Uri sourceAddress, ConsumeContext context = null)
-        {
-            return _context.PublishEndpointProvider.CreatePublishEndpoint(sourceAddress, context);
-        }
-
-        public Task<ISendEndpoint> GetPublishSendEndpoint<T>(T message)
+        public Task<ISendEndpoint> GetPublishSendEndpoint<T>()
             where T : class
         {
-            return _context.PublishEndpointProvider.GetPublishSendEndpoint(message);
+            return _context.PublishEndpointProvider.GetPublishSendEndpoint<T>();
         }
 
 
@@ -128,7 +115,11 @@ namespace MassTransit.Transports
 
             public Task Ready(ReceiveTransportReady ready)
             {
-                return _observer.Ready(new ReceiveEndpointReadyEvent(ready.InputAddress, _endpoint));
+                var endpointReadyEvent = new ReceiveEndpointReadyEvent(ready.InputAddress, _endpoint, ready.IsStarted);
+                if (ready.IsStarted)
+                    _endpoint._started.TrySetResultOnThreadPool(endpointReadyEvent);
+
+                return _observer.Ready(endpointReadyEvent);
             }
 
             public Task Completed(ReceiveTransportCompleted completed)
@@ -146,16 +137,22 @@ namespace MassTransit.Transports
         class Handle :
             ReceiveEndpointHandle
         {
+            readonly ReceiveEndpointContext _context;
+            readonly ReceiveEndpoint _endpoint;
             readonly ReceiveTransportHandle _transportHandle;
 
-            public Handle(ReceiveTransportHandle transportHandle)
+            public Handle(ReceiveEndpoint endpoint, ReceiveTransportHandle transportHandle, ReceiveEndpointContext context)
             {
+                _endpoint = endpoint;
                 _transportHandle = transportHandle;
+                _context = context;
             }
 
-            Task ReceiveEndpointHandle.Stop(CancellationToken cancellationToken)
+            async Task ReceiveEndpointHandle.Stop(CancellationToken cancellationToken)
             {
-                return _transportHandle.Stop(cancellationToken);
+                await _context.EndpointObservers.Stopping(new ReceiveEndpointStoppingEvent(_context.InputAddress, _endpoint)).ConfigureAwait(false);
+
+                await _transportHandle.Stop(cancellationToken).ConfigureAwait(false);
             }
         }
     }

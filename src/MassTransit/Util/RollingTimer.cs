@@ -1,15 +1,3 @@
-// Copyright 2007-2015 Chris Patterson, Dru Sellers, Travis Smith, et. al.
-//  
-// Licensed under the Apache License, Version 2.0 (the "License"); you may not use
-// this file except in compliance with the License. You may obtain a copy of the 
-// License at 
-// 
-//     http://www.apache.org/licenses/LICENSE-2.0 
-// 
-// Unless required by applicable law or agreed to in writing, software distributed
-// under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR 
-// CONDITIONS OF ANY KIND, either express or implied. See the License for the 
-// specific language governing permissions and limitations under the License.
 namespace MassTransit.Util
 {
     using System;
@@ -26,17 +14,21 @@ namespace MassTransit.Util
         readonly TimerCallback _callback;
         readonly TimeSpan _dueTime;
         readonly object _lock = new object();
+        readonly object _state;
         Timer _timer;
         int _triggered;
 
-        public RollingTimer(TimerCallback callback, TimeSpan dueTime)
+        public RollingTimer(TimerCallback callback, TimeSpan dueTime, object state = default)
         {
-            _callback = o =>
+            void Callback(object obj)
             {
-                Interlocked.CompareExchange(ref _triggered, 1, 0);
-                callback(o);
-            };
+                Set();
+                callback(obj);
+            }
+
+            _callback = Callback;
             _dueTime = dueTime;
+            _state = state;
         }
 
         public bool Triggered => Interlocked.CompareExchange(ref _triggered, int.MinValue, int.MinValue) == 1;
@@ -45,7 +37,8 @@ namespace MassTransit.Util
         {
             lock (_lock)
             {
-                Interlocked.CompareExchange(ref _triggered, 0, 1);
+                Reset();
+
                 _timer?.Dispose();
                 _timer = null;
             }
@@ -63,10 +56,12 @@ namespace MassTransit.Util
             }
         }
 
-        void StartInternal()
+        /// <summary>
+        /// Stops and disposes the existing timer.
+        /// </summary>
+        public void Stop()
         {
-            Interlocked.CompareExchange(ref _triggered, 0, 1);
-            _timer = new Timer(_callback, null, _dueTime, TimeSpan.FromMilliseconds(-1));
+            Dispose();
         }
 
         /// <summary>
@@ -80,18 +75,32 @@ namespace MassTransit.Util
                     StartInternal();
                 else
                 {
-                    Interlocked.CompareExchange(ref _triggered, 0, 1);
+                    Reset();
                     _timer.Change(_dueTime, TimeSpan.FromMilliseconds(-1));
                 }
             }
         }
 
-        /// <summary>
-        /// Stops and disposes the existing timer.
-        /// </summary>
-        public void Stop()
+        void StartInternal()
         {
-            Dispose();
+            Reset();
+            _timer = new Timer(_callback, _state, _dueTime, TimeSpan.FromMilliseconds(-1));
+        }
+
+        /// <summary>
+        /// Sets the timer as triggered
+        /// </summary>
+        void Set()
+        {
+            Interlocked.CompareExchange(ref _triggered, 1, 0);
+        }
+
+        /// <summary>
+        /// Resets the trigger status
+        /// </summary>
+        void Reset()
+        {
+            Interlocked.CompareExchange(ref _triggered, 0, 1);
         }
     }
 }

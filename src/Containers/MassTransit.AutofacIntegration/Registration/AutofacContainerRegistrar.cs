@@ -1,22 +1,13 @@
-// Copyright 2007-2019 Chris Patterson, Dru Sellers, Travis Smith, et. al.
-//
-// Licensed under the Apache License, Version 2.0 (the "License"); you may not use
-// this file except in compliance with the License. You may obtain a copy of the
-// License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software distributed
-// under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
-// CONDITIONS OF ANY KIND, either express or implied. See the License for the
-// specific language governing permissions and limitations under the License.
 namespace MassTransit.AutofacIntegration.Registration
 {
     using System;
     using Autofac;
+    using Automatonymous;
+    using Clients;
     using Courier;
     using Definition;
     using MassTransit.Registration;
+    using Mediator;
     using Saga;
     using ScopeProviders;
     using Scoping;
@@ -31,6 +22,9 @@ namespace MassTransit.AutofacIntegration.Registration
         {
             _builder = builder;
         }
+
+        public Action<ContainerBuilder, ConsumeContext> ConfigureScope { get; set; }
+        public string ScopeName { get; set; }
 
         public void RegisterConsumer<T>()
             where T : class, IConsumer
@@ -51,6 +45,39 @@ namespace MassTransit.AutofacIntegration.Registration
         {
         }
 
+        public void RegisterSagaStateMachine<TStateMachine, TInstance>()
+            where TStateMachine : class, SagaStateMachine<TInstance>
+            where TInstance : class, SagaStateMachineInstance
+        {
+            _builder.RegisterType<TStateMachine>()
+                .AsSelf()
+                .As<SagaStateMachine<TInstance>>()
+                .SingleInstance();
+        }
+
+        public void RegisterSagaRepository<TSaga>(Func<IConfigurationServiceProvider, ISagaRepository<TSaga>> repositoryFactory)
+            where TSaga : class, ISaga
+        {
+            RegisterSingleInstance(provider => repositoryFactory(provider));
+        }
+
+        void IContainerRegistrar.RegisterSagaRepository<TSaga, TContext, TConsumeContextFactory, TRepositoryContextFactory>()
+        {
+            _builder.RegisterType<TConsumeContextFactory>().As<ISagaConsumeContextFactory<TContext, TSaga>>();
+            _builder.RegisterType<TRepositoryContextFactory>().As<ISagaRepositoryContextFactory<TSaga>>();
+
+            _builder.Register(context =>
+            {
+                var lifetimeScopeProvider = context.ResolveOptional<ILifetimeScopeProvider>()
+                    ?? new SingleLifetimeScopeProvider(context.Resolve<ILifetimeScope>());
+
+                return new AutofacSagaRepositoryContextFactory<TSaga>(lifetimeScopeProvider, ScopeName, ConfigureScope);
+            });
+
+            _builder.Register<ISagaRepository<TSaga>>(context => new SagaRepository<TSaga>(context.Resolve<AutofacSagaRepositoryContextFactory<TSaga>>()))
+                .SingleInstance();
+        }
+
         public void RegisterSagaDefinition<TDefinition, TSaga>()
             where TDefinition : class, ISagaDefinition<TSaga>
             where TSaga : class, ISaga
@@ -60,7 +87,7 @@ namespace MassTransit.AutofacIntegration.Registration
         }
 
         public void RegisterExecuteActivity<TActivity, TArguments>()
-            where TActivity : class, ExecuteActivity<TArguments>
+            where TActivity : class, IExecuteActivity<TArguments>
             where TArguments : class
         {
             _builder.RegisterType<TActivity>();
@@ -71,7 +98,7 @@ namespace MassTransit.AutofacIntegration.Registration
 
         public void RegisterActivityDefinition<TDefinition, TActivity, TArguments, TLog>()
             where TDefinition : class, IActivityDefinition<TActivity, TArguments, TLog>
-            where TActivity : class, Activity<TArguments, TLog>
+            where TActivity : class, IActivity<TArguments, TLog>
             where TArguments : class
             where TLog : class
         {
@@ -81,7 +108,7 @@ namespace MassTransit.AutofacIntegration.Registration
 
         public void RegisterExecuteActivityDefinition<TDefinition, TActivity, TArguments>()
             where TDefinition : class, IExecuteActivityDefinition<TActivity, TArguments>
-            where TActivity : class, ExecuteActivity<TArguments>
+            where TActivity : class, IExecuteActivity<TArguments>
             where TArguments : class
         {
             _builder.RegisterType<TDefinition>()
@@ -104,12 +131,14 @@ namespace MassTransit.AutofacIntegration.Registration
         {
             _builder.Register(context =>
             {
-                var clientFactory = context.Resolve<IClientFactory>();
+                var clientFactory = GetClientFactory(context);
 
-                return context.TryResolve(out ConsumeContext consumeContext)
-                    ? clientFactory.CreateRequestClient<T>(consumeContext, timeout)
-                    : clientFactory.CreateRequestClient<T>(timeout);
-            });
+                if (context.TryResolve(out ConsumeContext consumeContext))
+                    return clientFactory.CreateRequestClient<T>(consumeContext, timeout);
+
+                return new ClientFactory(new ScopedClientFactoryContext<ILifetimeScope>(clientFactory, context.Resolve<ILifetimeScope>()))
+                    .CreateRequestClient<T>(timeout);
+            }).InstancePerLifetimeScope();
         }
 
         public void RegisterRequestClient<T>(Uri destinationAddress, RequestTimeout timeout = default)
@@ -117,16 +146,43 @@ namespace MassTransit.AutofacIntegration.Registration
         {
             _builder.Register(context =>
             {
-                var clientFactory = context.Resolve<IClientFactory>();
+                var clientFactory = GetClientFactory(context);
 
-                return context.TryResolve(out ConsumeContext consumeContext)
-                    ? clientFactory.CreateRequestClient<T>(consumeContext, destinationAddress, timeout)
-                    : clientFactory.CreateRequestClient<T>(destinationAddress, timeout);
-            });
+                if (context.TryResolve(out ConsumeContext consumeContext))
+                    return clientFactory.CreateRequestClient<T>(consumeContext, destinationAddress, timeout);
+
+                return new ClientFactory(new ScopedClientFactoryContext<ILifetimeScope>(clientFactory, context.Resolve<ILifetimeScope>()))
+                    .CreateRequestClient<T>(destinationAddress, timeout);
+            }).InstancePerLifetimeScope();
+        }
+
+        public void Register<T, TImplementation>()
+            where T : class
+            where TImplementation : class, T
+        {
+            _builder.RegisterType<TImplementation>().As<T>().InstancePerLifetimeScope();
+        }
+
+        public void Register<T>(Func<IConfigurationServiceProvider, T> factoryMethod)
+            where T : class
+        {
+            _builder.Register(context => factoryMethod(new AutofacConfigurationServiceProvider(context.Resolve<ILifetimeScope>())));
+        }
+
+        public void RegisterSingleInstance<T>(Func<IConfigurationServiceProvider, T> factoryMethod)
+            where T : class
+        {
+            _builder.Register(context => factoryMethod(new AutofacConfigurationServiceProvider(context.Resolve<ILifetimeScope>()))).SingleInstance();
+        }
+
+        public void RegisterSingleInstance<T>(T instance)
+            where T : class
+        {
+            _builder.RegisterInstance(instance);
         }
 
         public void RegisterCompensateActivity<TActivity, TLog>()
-            where TActivity : class, CompensateActivity<TLog>
+            where TActivity : class, ICompensateActivity<TLog>
             where TLog : class
         {
             _builder.RegisterType<TActivity>();
@@ -136,7 +192,7 @@ namespace MassTransit.AutofacIntegration.Registration
         }
 
         IExecuteActivityScopeProvider<TActivity, TArguments> CreateExecuteActivityScopeProvider<TActivity, TArguments>(IComponentContext context)
-            where TActivity : class, ExecuteActivity<TArguments>
+            where TActivity : class, IExecuteActivity<TArguments>
             where TArguments : class
         {
             var lifetimeScopeProvider = new SingleLifetimeScopeProvider(context.Resolve<ILifetimeScope>());
@@ -145,12 +201,32 @@ namespace MassTransit.AutofacIntegration.Registration
         }
 
         ICompensateActivityScopeProvider<TActivity, TLog> CreateCompensateActivityScopeProvider<TActivity, TLog>(IComponentContext context)
-            where TActivity : class, CompensateActivity<TLog>
+            where TActivity : class, ICompensateActivity<TLog>
             where TLog : class
         {
             var lifetimeScopeProvider = new SingleLifetimeScopeProvider(context.Resolve<ILifetimeScope>());
 
             return new AutofacCompensateActivityScopeProvider<TActivity, TLog>(lifetimeScopeProvider, "message");
+        }
+
+        protected virtual IClientFactory GetClientFactory(IComponentContext componentContext)
+        {
+            return componentContext.Resolve<IClientFactory>();
+        }
+    }
+
+
+    public class AutofacContainerMediatorRegistrar :
+        AutofacContainerRegistrar
+    {
+        public AutofacContainerMediatorRegistrar(ContainerBuilder builder)
+            : base(builder)
+        {
+        }
+
+        protected override IClientFactory GetClientFactory(IComponentContext componentContext)
+        {
+            return componentContext.Resolve<IMediator>();
         }
     }
 }

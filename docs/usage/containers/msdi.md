@@ -1,4 +1,4 @@
-# Configuring Microsoft Dependency Injection
+# Microsoft Dependency Injection
 
 **Important**
 This documentation applies to ASP.NET Core 2.0 and 2.1. For the ASP.NET Core 2.2, you can use the 
@@ -25,26 +25,24 @@ public class Startup
         {
             x.AddConsumer<OrderConsumer>();
 
-            x.AddBus(provider => Bus.Factory.CreateUsingRabbitMq(cfg =>
+            x.UsingRabbitMq(cfg =>
             {
-                var host = cfg.Host("localhost", "/", h => { });
-
-                cfg.ReceiveEndpoint(host, "submit-order", e =>
+                cfg.ReceiveEndpoint("submit-order", e =>
                 {
                     e.PrefetchCount = 16;
                     e.UseMessageRetry(x => x.Interval(2, 100));
 
-                    e.ConfigureConsumer<OrderConsumer>(provider);
+                    e.ConfigureConsumer<OrderConsumer>(context);
                     
                     EndpointConvention.Map<SubmitOrder>(e.InputAddress);
                 });
 
                 // or, configure the endpoints by convention
-                cfg.ConfigureEndpoints(provider);
-            }));
+                cfg.ConfigureEndpoints(context);
+            });
 
             x.AddRequestClient<SubmitOrder>();
-        }));
+        });
 
         services.AddSingleton<IHostedService, BusService>();
     }

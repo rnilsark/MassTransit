@@ -1,39 +1,23 @@
-// Copyright 2007-2015 Chris Patterson, Dru Sellers, Travis Smith, et. al.
-//  
-// Licensed under the Apache License, Version 2.0 (the "License"); you may not use
-// this file except in compliance with the License. You may obtain a copy of the 
-// License at 
-// 
-//     http://www.apache.org/licenses/LICENSE-2.0 
-// 
-// Unless required by applicable law or agreed to in writing, software distributed
-// under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR 
-// CONDITIONS OF ANY KIND, either express or implied. See the License for the 
-// specific language governing permissions and limitations under the License.
 namespace MassTransit.Serialization
 {
     using System;
     using System.Collections.Generic;
     using System.Linq;
     using System.Reflection;
-    using System.Threading.Tasks;
     using Context;
-    using GreenPipes.Internals.Extensions;
+    using Metadata;
     using Newtonsoft.Json;
     using Newtonsoft.Json.Linq;
-    using Util;
 
 
     public class JsonConsumeContext :
-        BaseConsumeContext
+        DeserializerConsumeContext
     {
         readonly JsonSerializer _deserializer;
         readonly MessageEnvelope _envelope;
         readonly JToken _messageToken;
         readonly IDictionary<Type, ConsumeContext> _messageTypes;
-        readonly IObjectTypeDeserializer _objectTypeDeserializer;
         readonly string[] _supportedTypes;
-        readonly List<Task> _consumeTasks;
 
         Guid? _conversationId;
         Guid? _correlationId;
@@ -46,8 +30,7 @@ namespace MassTransit.Serialization
         Uri _responseAddress;
         Uri _sourceAddress;
 
-        public JsonConsumeContext(JsonSerializer deserializer, IObjectTypeDeserializer objectTypeDeserializer, ReceiveContext receiveContext,
-            MessageEnvelope envelope)
+        public JsonConsumeContext(JsonSerializer deserializer, ReceiveContext receiveContext, MessageEnvelope envelope)
             : base(receiveContext)
         {
             if (envelope == null)
@@ -55,34 +38,26 @@ namespace MassTransit.Serialization
 
             _envelope = envelope;
             _deserializer = deserializer;
-            _objectTypeDeserializer = objectTypeDeserializer;
             _messageToken = GetMessageToken(envelope.Message);
             _supportedTypes = envelope.MessageType.ToArray();
             _messageTypes = new Dictionary<Type, ConsumeContext>();
-            _consumeTasks = new List<Task>();
         }
 
-        public override Task ConsumeCompleted
-        {
-            get
-            {
-                lock (_consumeTasks)
-                    return Task.WhenAll(_consumeTasks.ToArray());
-            }
-        }
-
-        public override Guid? MessageId => _messageId ?? (_messageId = ConvertIdToGuid(_envelope.MessageId));
-        public override Guid? RequestId => _requestId ?? (_requestId = ConvertIdToGuid(_envelope.RequestId));
-        public override Guid? CorrelationId => _correlationId ?? (_correlationId = ConvertIdToGuid(_envelope.CorrelationId));
-        public override Guid? ConversationId => _conversationId ?? (_conversationId = ConvertIdToGuid(_envelope.ConversationId));
-        public override Guid? InitiatorId => _initiatorId ?? (_initiatorId = ConvertIdToGuid(_envelope.InitiatorId));
+        public override Guid? MessageId => _messageId ??= ConvertIdToGuid(_envelope.MessageId);
+        public override Guid? RequestId => _requestId ??= ConvertIdToGuid(_envelope.RequestId);
+        public override Guid? CorrelationId => _correlationId ??= ConvertIdToGuid(_envelope.CorrelationId);
+        public override Guid? ConversationId => _conversationId ??= ConvertIdToGuid(_envelope.ConversationId);
+        public override Guid? InitiatorId => _initiatorId ??= ConvertIdToGuid(_envelope.InitiatorId);
         public override DateTime? ExpirationTime => _envelope.ExpirationTime;
-        public override Uri SourceAddress => _sourceAddress ?? (_sourceAddress = ConvertToUri(_envelope.SourceAddress));
-        public override Uri DestinationAddress => _destinationAddress ?? (_destinationAddress = ConvertToUri(_envelope.DestinationAddress));
-        public override Uri ResponseAddress => _responseAddress ?? (_responseAddress = ConvertToUri(_envelope.ResponseAddress));
-        public override Uri FaultAddress => _faultAddress ?? (_faultAddress = ConvertToUri(_envelope.FaultAddress));
+        public override Uri SourceAddress => _sourceAddress ??= ConvertToUri(_envelope.SourceAddress);
+        public override Uri DestinationAddress => _destinationAddress ??= ConvertToUri(_envelope.DestinationAddress);
+        public override Uri ResponseAddress => _responseAddress ??= ConvertToUri(_envelope.ResponseAddress);
+        public override Uri FaultAddress => _faultAddress ??= ConvertToUri(_envelope.FaultAddress);
         public override DateTime? SentTime => _envelope.SentTime;
-        public override Headers Headers => _headers ?? (_headers = new JsonMessageHeaders(_objectTypeDeserializer, _envelope.Headers));
+
+        public override Headers Headers =>
+            _headers ??= _envelope.Headers != null ? (Headers)new JsonEnvelopeHeaders(_envelope.Headers) : NoMessageHeaders.Instance;
+
         public override HostInfo Host => _envelope.Host;
         public override IEnumerable<string> SupportedMessageTypes => _supportedTypes;
 
@@ -94,7 +69,7 @@ namespace MassTransit.Serialization
                     return existing != null;
             }
 
-            string typeUrn = new MessageUrn(messageType).ToString();
+            var typeUrn = MessageUrn.ForTypeString(messageType);
 
             return _supportedTypes.Any(x => typeUrn.Equals(x, StringComparison.OrdinalIgnoreCase));
         }
@@ -115,16 +90,16 @@ namespace MassTransit.Serialization
                     return true;
                 }
 
-                string typeUrn = new MessageUrn(typeof(T)).ToString();
+                var typeUrn = MessageUrn.ForTypeString<T>();
 
-                if (_supportedTypes.Any(typeUrn.Equals))
+                if (_supportedTypes.Any(x => typeUrn.Equals(x, StringComparison.OrdinalIgnoreCase)))
                 {
                     object obj;
-                    Type deserializeType = typeof(T);
+                    var deserializeType = typeof(T);
                     if (deserializeType.GetTypeInfo().IsInterface && TypeMetadataCache<T>.IsValidMessageType)
-                        deserializeType = TypeCache.GetImplementationType(deserializeType);
+                        deserializeType = TypeMetadataCache<T>.ImplementationType;
 
-                    using (JsonReader jsonReader = _messageToken.CreateReader())
+                    using (var jsonReader = _messageToken.CreateReader())
                     {
                         obj = _deserializer.Deserialize(jsonReader, deserializeType);
                     }
@@ -138,27 +113,18 @@ namespace MassTransit.Serialization
             }
         }
 
-        public override void AddConsumeTask(Task task)
-        {
-            lock (_consumeTasks)
-                _consumeTasks.Add(task);
-        }
-
         static JToken GetMessageToken(object message)
         {
             var messageToken = message as JToken;
-            if (messageToken == null)
-                return new JObject();
-
-            if (messageToken.Type == JTokenType.Null)
+            if (messageToken == null || messageToken.Type == JTokenType.Null)
                 return new JObject();
 
             return messageToken;
         }
 
         /// <summary>
-        ///     Converts a string identifier to a Guid, if it's actually a Guid. Can throw a FormatException
-        ///     if things are not right
+        /// Converts a string identifier to a Guid, if it is actually a Guid. Can throw a FormatException
+        /// if things are not right
         /// </summary>
         /// <param name="id"></param>
         /// <returns></returns>
@@ -174,7 +140,7 @@ namespace MassTransit.Serialization
         }
 
         /// <summary>
-        ///     Convert the string to a Uri, or return null if it's empty
+        /// Convert the string to a Uri, or return null if it is empty
         /// </summary>
         /// <param name="uri"></param>
         /// <returns></returns>

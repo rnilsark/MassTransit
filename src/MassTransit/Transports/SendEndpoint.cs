@@ -1,16 +1,4 @@
-﻿// Copyright 2007-2016 Chris Patterson, Dru Sellers, Travis Smith, et. al.
-//  
-// Licensed under the Apache License, Version 2.0 (the "License"); you may not use
-// this file except in compliance with the License. You may obtain a copy of the 
-// License at 
-// 
-//     http://www.apache.org/licenses/LICENSE-2.0 
-// 
-// Unless required by applicable law or agreed to in writing, software distributed
-// under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR 
-// CONDITIONS OF ANY KIND, either express or implied. See the License for the 
-// specific language governing permissions and limitations under the License.
-namespace MassTransit.Transports
+﻿namespace MassTransit.Transports
 {
     using System;
     using System.Threading;
@@ -25,8 +13,8 @@ namespace MassTransit.Transports
         ISendEndpoint,
         IAsyncDisposable
     {
-        readonly ISendPipe _sendPipe;
         readonly ConnectHandle _observerHandle;
+        readonly ISendPipe _sendPipe;
         readonly ISendTransport _transport;
 
         public SendEndpoint(ISendTransport transport, IMessageSerializer serializer, Uri destinationAddress, Uri sourceAddress, ISendPipe sendPipe,
@@ -47,14 +35,14 @@ namespace MassTransit.Transports
 
         Uri SourceAddress { get; }
 
-        public async Task DisposeAsync(CancellationToken cancellationToken)
+        public async ValueTask DisposeAsync()
         {
             _observerHandle?.Disconnect();
 
             switch (_transport)
             {
                 case IAsyncDisposable disposable:
-                    await disposable.DisposeAsync(cancellationToken).ConfigureAwait(false);
+                    await disposable.DisposeAsync().ConfigureAwait(false);
                     break;
 
                 case IDisposable disposable:
@@ -74,9 +62,7 @@ namespace MassTransit.Transports
             if (message == null)
                 throw new ArgumentNullException(nameof(message));
 
-            var settingsPipe = new EndpointSendContextPipe<T>(this);
-
-            return _transport.Send(message, settingsPipe, cancellationToken);
+            return _transport.Send(message, new SendEndpointPipe<T>(this), cancellationToken);
         }
 
         public Task Send<T>(T message, IPipe<SendContext<T>> pipe, CancellationToken cancellationToken)
@@ -84,13 +70,10 @@ namespace MassTransit.Transports
         {
             if (message == null)
                 throw new ArgumentNullException(nameof(message));
-
             if (pipe == null)
                 throw new ArgumentNullException(nameof(pipe));
 
-            var settingsPipe = new EndpointSendContextPipe<T>(this, pipe);
-
-            return _transport.Send(message, settingsPipe, cancellationToken);
+            return _transport.Send(message, new SendEndpointPipe<T>(this, pipe), cancellationToken);
         }
 
         public Task Send(object message, CancellationToken cancellationToken)
@@ -107,7 +90,6 @@ namespace MassTransit.Transports
         {
             if (message == null)
                 throw new ArgumentNullException(nameof(message));
-
             if (messageType == null)
                 throw new ArgumentNullException(nameof(messageType));
 
@@ -128,20 +110,16 @@ namespace MassTransit.Transports
         {
             if (message == null)
                 throw new ArgumentNullException(nameof(message));
-
             if (pipe == null)
                 throw new ArgumentNullException(nameof(pipe));
 
-            var settingsPipe = new EndpointSendContextPipe<T>(this, pipe);
-
-            return _transport.Send(message, settingsPipe, cancellationToken);
+            return _transport.Send(message, new SendEndpointPipe<T>(this, pipe), cancellationToken);
         }
 
         public Task Send(object message, IPipe<SendContext> pipe, CancellationToken cancellationToken)
         {
             if (message == null)
                 throw new ArgumentNullException(nameof(message));
-
             if (pipe == null)
                 throw new ArgumentNullException(nameof(pipe));
 
@@ -154,10 +132,8 @@ namespace MassTransit.Transports
         {
             if (message == null)
                 throw new ArgumentNullException(nameof(message));
-
             if (messageType == null)
                 throw new ArgumentNullException(nameof(messageType));
-
             if (pipe == null)
                 throw new ArgumentNullException(nameof(pipe));
 
@@ -186,22 +162,27 @@ namespace MassTransit.Transports
         }
 
 
-        class EndpointSendContextPipe<T> :
+        class SendEndpointPipe<T> :
             IPipe<SendContext<T>>
             where T : class
         {
             readonly SendEndpoint _endpoint;
             readonly IPipe<SendContext<T>> _pipe;
+            readonly ISendContextPipe _sendContextPipe;
 
-            public EndpointSendContextPipe(SendEndpoint endpoint)
+            public SendEndpointPipe(SendEndpoint endpoint)
             {
                 _endpoint = endpoint;
+                _pipe = default;
+                _sendContextPipe = default;
             }
 
-            public EndpointSendContextPipe(SendEndpoint endpoint, IPipe<SendContext<T>> pipe)
+            public SendEndpointPipe(SendEndpoint endpoint, IPipe<SendContext<T>> pipe)
             {
                 _endpoint = endpoint;
                 _pipe = pipe;
+                // ReSharper disable once SuspiciousTypeConversion.Global
+                _sendContextPipe = pipe as ISendContextPipe;
             }
 
             void IProbeSite.Probe(ProbeContext context)
@@ -216,6 +197,9 @@ namespace MassTransit.Transports
 
                 if (context.SourceAddress == null)
                     context.SourceAddress = _endpoint.SourceAddress;
+
+                if (_sendContextPipe != null)
+                    await _sendContextPipe.Send(context).ConfigureAwait(false);
 
                 if (_endpoint._sendPipe != null)
                     await _endpoint._sendPipe.Send(context).ConfigureAwait(false);

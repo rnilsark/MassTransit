@@ -1,21 +1,10 @@
-﻿// Copyright 2007-2018 Chris Patterson, Dru Sellers, Travis Smith, et. al.
-//
-// Licensed under the Apache License, Version 2.0 (the "License"); you may not use
-// this file except in compliance with the License. You may obtain a copy of the
-// License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software distributed
-// under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
-// CONDITIONS OF ANY KIND, either express or implied. See the License for the
-// specific language governing permissions and limitations under the License.
-namespace MassTransit
+﻿namespace MassTransit
 {
     using System;
     using System.Threading.Tasks;
     using Clients;
     using Clients.Contexts;
+    using Definition;
 
 
     public static class ClientFactoryExtensions
@@ -108,12 +97,14 @@ namespace MassTransit
         /// <summary>
         /// Connects a client factory to a host receive endpoint, using the bus as the send endpoint provider
         /// </summary>
-        /// <param name="receiveEndpointHandle">A handle to the receive endpoint, which is stopped when the client factory is disposed</param>
+        /// <param name="receiveEndpointHandle">
+        /// A handle to the receive endpoint, which is stopped when the client factory is disposed
+        /// </param>
         /// <param name="timeout"></param>
         /// <returns></returns>
         public static async Task<IClientFactory> CreateClientFactory(this HostReceiveEndpointHandle receiveEndpointHandle, RequestTimeout timeout = default)
         {
-            ReceiveEndpointReady ready = await receiveEndpointHandle.Ready.ConfigureAwait(false);
+            var ready = await receiveEndpointHandle.Ready.ConfigureAwait(false);
 
             var context = new HostReceiveEndpointClientFactoryContext(receiveEndpointHandle, ready, timeout);
 
@@ -121,45 +112,31 @@ namespace MassTransit
         }
 
         /// <summary>
-        /// Connects a new receive endpoint to the host, and creates a <see cref="IClientFactory"/>.
+        /// Connects a new receive endpoint to the host, and creates a <see cref="IClientFactory" />.
         /// </summary>
-        /// <param name="host">The host to connect the new receive endpoint</param>
+        /// <param name="connector">The host to connect the new receive endpoint</param>
         /// <param name="timeout">The default request timeout</param>
         /// <returns></returns>
-        public static Task<IClientFactory> CreateClientFactory(this IHost host, RequestTimeout timeout = default)
+        public static Task<IClientFactory> CreateClientFactory(this IReceiveConnector connector, RequestTimeout timeout = default)
         {
-            var receiveEndpointHandle = host.ConnectResponseEndpoint();
+            var receiveEndpointHandle = connector.ConnectResponseEndpoint();
 
             return receiveEndpointHandle.CreateClientFactory(timeout);
         }
 
         /// <summary>
-        /// Connects a new receive endpoint to the host, and creates a <see cref="IClientFactory"/>.
+        /// Connects a new receive endpoint to the host, and creates a <see cref="IClientFactory" />.
         /// </summary>
-        /// <param name="host">The host to connect the new receive endpoint</param>
-        /// <param name="destinationAddress">The request service address</param>
+        /// <param name="connector">The host to connect the new receive endpoint</param>
         /// <param name="timeout">The default request timeout</param>
         /// <returns></returns>
-        public static async Task<IRequestClient<T>> CreateRequestClient<T>(this IHost host, Uri destinationAddress, RequestTimeout timeout = default)
-            where T : class
+        public static Task<IClientFactory> ConnectClientFactory(this IReceiveConnector connector, RequestTimeout timeout = default)
         {
-            var clientFactory = await CreateClientFactory(host, timeout).ConfigureAwait(false);
+            var endpointDefinition = new TemporaryEndpointDefinition();
 
-            return clientFactory.CreateRequestClient<T>(destinationAddress);
-        }
+            var receiveEndpointHandle = connector.ConnectReceiveEndpoint(endpointDefinition, KebabCaseEndpointNameFormatter.Instance);
 
-        /// <summary>
-        /// Create a request client from the bus, creating a response endpoint, and publishing the request versus sending it.
-        /// </summary>
-        /// <param name="host">The host to connect the new receive endpoint</param>
-        /// <param name="timeout">The default request timeout</param>
-        /// <returns></returns>
-        public static async Task<IRequestClient<T>> CreateRequestClient<T>(this IHost host, RequestTimeout timeout = default)
-            where T : class
-        {
-            var clientFactory = await CreateClientFactory(host, timeout).ConfigureAwait(false);
-
-            return clientFactory.CreateRequestClient<T>();
+            return receiveEndpointHandle.CreateClientFactory(timeout);
         }
     }
 }

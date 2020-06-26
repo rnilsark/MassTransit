@@ -1,15 +1,3 @@
-// Copyright 2007-2017 Chris Patterson, Dru Sellers, Travis Smith, et. al.
-//  
-// Licensed under the Apache License, Version 2.0 (the "License"); you may not use
-// this file except in compliance with the License. You may obtain a copy of the 
-// License at 
-// 
-//     http://www.apache.org/licenses/LICENSE-2.0 
-// 
-// Unless required by applicable law or agreed to in writing, software distributed
-// under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR 
-// CONDITIONS OF ANY KIND, either express or implied. See the License for the 
-// specific language governing permissions and limitations under the License.
 namespace MassTransit.Metadata
 {
     using System;
@@ -18,7 +6,6 @@ namespace MassTransit.Metadata
     using System.Reflection;
     using System.Threading;
     using Internals.Extensions;
-    using Util;
 
 
     public class ImplementedMessageTypeCache<TMessage> :
@@ -72,18 +59,14 @@ namespace MassTransit.Metadata
                 }
             }
 
-            var implementedInterfaces = GetImplementedInterfaces(typeof(TMessage)).ToArray();
+            Type[] implementedInterfaces = GetImplementedInterfaces(typeof(TMessage)).ToArray();
 
             foreach (var baseInterface in implementedInterfaces.Except(implementedInterfaces.SelectMany(x => x.GetInterfaces()))
                 .Where(TypeMetadataCache.IsValidMessageType))
-            {
                 yield return new ImplementedType(baseInterface, true);
-            }
 
             foreach (var baseInterface in implementedInterfaces.SelectMany(x => x.GetInterfaces()).Distinct().Where(TypeMetadataCache.IsValidMessageType))
-            {
                 yield return new ImplementedType(baseInterface, false);
-            }
 
             var baseType = typeof(TMessage).GetTypeInfo().BaseType;
             while (baseType != null && TypeMetadataCache.IsValidMessageType(baseType))
@@ -91,9 +74,7 @@ namespace MassTransit.Metadata
                 yield return new ImplementedType(baseType, typeof(TMessage).GetTypeInfo().BaseType == baseType);
 
                 foreach (var baseInterface in GetImplementedInterfaces(baseType).Where(TypeMetadataCache.IsValidMessageType))
-                {
                     yield return new ImplementedType(baseInterface, false);
-                }
 
                 baseType = baseType.GetTypeInfo().BaseType;
             }
@@ -109,10 +90,12 @@ namespace MassTransit.Metadata
                 .ToArray();
 
             if (baseTypeInfo.BaseType != null && baseTypeInfo.BaseType != typeof(object))
+            {
                 baseInterfaces = baseInterfaces
                     .Except(baseTypeInfo.BaseType.GetInterfaces())
                     .Except(baseInterfaces.SelectMany(x => x.GetInterfaces()))
                     .ToArray();
+            }
 
             return baseInterfaces;
         }

@@ -1,16 +1,4 @@
-﻿// Copyright 2007-2018 Chris Patterson, Dru Sellers, Travis Smith, et. al.
-//
-// Licensed under the Apache License, Version 2.0 (the "License"); you may not use
-// this file except in compliance with the License. You may obtain a copy of the
-// License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software distributed
-// under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
-// CONDITIONS OF ANY KIND, either express or implied. See the License for the
-// specific language governing permissions and limitations under the License.
-namespace MassTransit.Configuration
+﻿namespace MassTransit.Configuration
 {
     using System;
     using System.Collections.Generic;
@@ -46,6 +34,24 @@ namespace MassTransit.Configuration
 
         public IBuildPipeConfigurator<ExceptionReceiveContext> ErrorConfigurator { get; }
 
+        public IReceivePipe CreatePipe(IConsumePipe consumePipe, IMessageDeserializer messageDeserializer)
+        {
+            if (_created)
+                throw new ConfigurationException("The ReceivePipeConfiguration can only be used once.");
+
+            _configurator.UseDeadLetter(CreateDeadLetterPipe());
+            _configurator.UseRescue(CreateErrorPipe(), x =>
+            {
+                x.Ignore<OperationCanceledException>();
+            });
+
+            _configurator.UseFilter(new DeserializeFilter(messageDeserializer, consumePipe));
+
+            _created = true;
+
+            return new ReceivePipe(_configurator.Build(), consumePipe);
+        }
+
         public void AddPipeSpecification(IPipeSpecification<ReceiveContext> specification)
         {
             _configurator.AddPipeSpecification(specification);
@@ -58,40 +64,27 @@ namespace MassTransit.Configuration
                 .Concat(ErrorConfigurator.Validate());
         }
 
-        IReceivePipe IReceivePipeConfiguration.CreatePipe(IConsumePipe consumePipe, IMessageDeserializer messageDeserializer,
-            Action<IPipeConfigurator<ReceiveContext>> configure)
+        IPipe<ReceiveContext> CreateDeadLetterPipe()
         {
-            if (_created)
-                throw new ConfigurationException("The ReceivePipeConfiguration can only be used once.");
+            IPipe<ReceiveContext> deadLetterPipe = DeadLetterConfigurator.Build();
+            if (deadLetterPipe.IsNotEmpty())
+                return deadLetterPipe;
 
-            if (configure == null)
-            {
-                DeadLetterConfigurator.UseFilter(new DeadLetterTransportFilter());
-                _configurator.UseDeadLetter(DeadLetterConfigurator.Build());
+            DeadLetterConfigurator.UseFilter(new DeadLetterTransportFilter());
 
-                ErrorConfigurator.UseFilter(new GenerateFaultFilter());
-                ErrorConfigurator.UseFilter(new ErrorTransportFilter());
-
-                _configurator.UseRescue(ErrorConfigurator.Build(), x =>
-                {
-                    x.Ignore<OperationCanceledException>();
-                });
-            }
-            else
-            {
-                configure(_configurator);
-            }
-
-            _configurator.UseFilter(new DeserializeFilter(messageDeserializer, consumePipe));
-
-            _created = true;
-
-            return new ReceivePipe(_configurator.Build(), consumePipe);
+            return DeadLetterConfigurator.Build();
         }
 
-        public IPipe<ReceiveContext> Build()
+        IPipe<ExceptionReceiveContext> CreateErrorPipe()
         {
-            return _configurator.Build();
+            IPipe<ExceptionReceiveContext> errorPipe = ErrorConfigurator.Build();
+            if (errorPipe.IsNotEmpty())
+                return errorPipe;
+
+            ErrorConfigurator.UseFilter(new GenerateFaultFilter());
+            ErrorConfigurator.UseFilter(new ErrorTransportFilter());
+
+            return ErrorConfigurator.Build();
         }
     }
 }

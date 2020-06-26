@@ -1,33 +1,23 @@
-// Copyright 2007-2019 Chris Patterson, Dru Sellers, Travis Smith, et. al.
-//
-// Licensed under the Apache License, Version 2.0 (the "License"); you may not use
-// this file except in compliance with the License. You may obtain a copy of the
-// License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software distributed
-// under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
-// CONDITIONS OF ANY KIND, either express or implied. See the License for the
-// specific language governing permissions and limitations under the License.
 namespace MassTransit.Registration
 {
     using System;
     using System.Collections.Generic;
+    using Context;
     using Courier;
     using Definition;
+    using Metadata;
     using PipeConfigurators;
     using Scoping;
 
 
     public class ActivityRegistration<TActivity, TArguments, TLog> :
         IActivityRegistration
-        where TActivity : class, Activity<TArguments, TLog>
+        where TActivity : class, IActivity<TArguments, TLog>
         where TArguments : class
         where TLog : class
     {
-        readonly List<Action<IExecuteActivityConfigurator<TActivity, TArguments>>> _executeActions;
         readonly List<Action<ICompensateActivityConfigurator<TActivity, TLog>>> _compensateActions;
+        readonly List<Action<IExecuteActivityConfigurator<TActivity, TArguments>>> _executeActions;
         IActivityDefinition<TActivity, TArguments, TLog> _definition;
 
         public ActivityRegistration()
@@ -37,7 +27,7 @@ namespace MassTransit.Registration
         }
 
         public void AddConfigureAction<T, TA>(Action<IExecuteActivityConfigurator<T, TA>> configure)
-            where T : class, ExecuteActivity<TA>
+            where T : class, IExecuteActivity<TA>
             where TA : class
         {
             if (configure is Action<IExecuteActivityConfigurator<TActivity, TArguments>> action)
@@ -45,7 +35,7 @@ namespace MassTransit.Registration
         }
 
         public void AddConfigureAction<T, TL>(Action<ICompensateActivityConfigurator<T, TL>> configure)
-            where T : class, CompensateActivity<TL>
+            where T : class, ICompensateActivity<TL>
             where TL : class
         {
             if (configure is Action<ICompensateActivityConfigurator<TActivity, TLog>> action)
@@ -65,44 +55,68 @@ namespace MassTransit.Registration
             return GetActivityDefinition(provider);
         }
 
-        IActivityDefinition<TActivity, TArguments, TLog> GetActivityDefinition(IConfigurationServiceProvider provider)
-        {
-            return _definition ?? (_definition = provider.GetService<IActivityDefinition<TActivity, TArguments, TLog>>()
-                ?? new DefaultActivityDefinition<TActivity, TArguments, TLog>());
-        }
-
-        void ConfigureCompensate(IReceiveEndpointConfigurator configurator, IConfigurationServiceProvider configurationServiceProvider)
+        public void ConfigureCompensate(IReceiveEndpointConfigurator configurator, IConfigurationServiceProvider configurationServiceProvider)
         {
             var activityScopeProvider = configurationServiceProvider.GetRequiredService<ICompensateActivityScopeProvider<TActivity, TLog>>();
 
             var activityFactory = new ScopeCompensateActivityFactory<TActivity, TLog>(activityScopeProvider);
 
-            var specification = new CompensateActivityHostSpecification<TActivity, TLog>(activityFactory);
+            var specification = new CompensateActivityHostSpecification<TActivity, TLog>(activityFactory, configurator);
+
+            configurator.ConfigureConsumeTopology = false;
 
             GetActivityDefinition(configurationServiceProvider)
                 .Configure(configurator, specification);
 
-            foreach (var action in _compensateActions)
+            foreach (Action<ICompensateActivityConfigurator<TActivity, TLog>> action in _compensateActions)
                 action(specification);
+
+            LogContext.Debug?.Log("Configured endpoint {Endpoint}, Compensate Activity: {ActivityType}", configurator.InputAddress.GetLastPart(),
+                TypeMetadataCache<TActivity>.ShortName);
 
             configurator.AddEndpointSpecification(specification);
         }
 
-        void ConfigureExecute(IReceiveEndpointConfigurator configurator, IConfigurationServiceProvider configurationServiceProvider, Uri compensateAddress)
+        public void ConfigureExecute(IReceiveEndpointConfigurator configurator, IConfigurationServiceProvider configurationServiceProvider,
+            Uri compensateAddress)
         {
             var activityScopeProvider = configurationServiceProvider.GetRequiredService<IExecuteActivityScopeProvider<TActivity, TArguments>>();
 
             var activityFactory = new ScopeExecuteActivityFactory<TActivity, TArguments>(activityScopeProvider);
 
-            var specification = new ExecuteActivityHostSpecification<TActivity, TArguments>(activityFactory, compensateAddress);
+            var specification = new ExecuteActivityHostSpecification<TActivity, TArguments>(activityFactory, compensateAddress, configurator);
+
+            configurator.ConfigureConsumeTopology = false;
 
             GetActivityDefinition(configurationServiceProvider)
                 .Configure(configurator, specification);
 
-            foreach (var action in _executeActions)
+            foreach (Action<IExecuteActivityConfigurator<TActivity, TArguments>> action in _executeActions)
                 action(specification);
 
+            LogContext.Debug?.Log("Configured endpoint {Endpoint}, Execute Activity: {ActivityType}", configurator.InputAddress.GetLastPart(),
+                TypeMetadataCache<TActivity>.ShortName);
+
             configurator.AddEndpointSpecification(specification);
+        }
+
+        IActivityDefinition<TActivity, TArguments, TLog> GetActivityDefinition(IConfigurationServiceProvider provider)
+        {
+            if (_definition != null)
+                return _definition;
+
+            _definition = provider.GetService<IActivityDefinition<TActivity, TArguments, TLog>>()
+                ?? new DefaultActivityDefinition<TActivity, TArguments, TLog>();
+
+            var executeEndpointDefinition = provider.GetService<IEndpointDefinition<IExecuteActivity<TArguments>>>();
+            if (executeEndpointDefinition != null)
+                _definition.ExecuteEndpointDefinition = executeEndpointDefinition;
+
+            var compensateEndpointDefinition = provider.GetService<IEndpointDefinition<ICompensateActivity<TLog>>>();
+            if (compensateEndpointDefinition != null)
+                _definition.CompensateEndpointDefinition = compensateEndpointDefinition;
+
+            return _definition;
         }
     }
 }

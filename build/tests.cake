@@ -6,42 +6,36 @@ public class Tests
 
     public static Tests GetTests(BuildParameters parameters)
     {
-        // Ran in all environments
+        // Ran in all environments, because they work with out any additional dependencies
         var testsToRun = new Dictionary<string, string>
         {
             { "MassTransit.Tests", null },
             { "MassTransit.Containers.Tests", null },
-            { "MassTransit.ApplicationInsights.Tests", null },
-            { "MassTransit.AutomatonymousIntegration.Tests", "Category!=DocumentDb&Category!=EntityFramework" }, // DocumentDb is only installed on appveyor windows vm, or develoer if they put DocDb emulator
+            { "MassTransit.Analyzers.Tests", null },
             { "MassTransit.QuartzIntegration.Tests", null },
-            { "MassTransit.HttpTransport.Tests", null },
+            { "MassTransit.HangfireIntegration.Tests", null },
             { "MassTransit.SignalR.Tests", null },
-            { "MassTransit.NHibernateIntegration.Tests", null },
-            // { "MassTransit.AzureServiceBusTransport.Tests", "Category!=Flakey" }
+            { "MassTransit.NHibernateIntegration.Tests", null }
         };
 
         // Add these tests to run in Appveyor Only
         if(parameters.IsRunningOnAppVeyor)
         {
-            testsToRun["MassTransit.MongoDbIntegration.Tests"] = null;
-            testsToRun["MassTransit.EntityFrameworkCoreIntegration.Tests"] = null;
-            testsToRun["MassTransit.EntityFrameworkIntegration.Tests"] = null;
-        }
+            if(parameters.IsRunningOnUnix)
+            {
+                testsToRun["MassTransit.RedisIntegration.Tests"] = null;
+                testsToRun["MassTransit.RabbitMqTransport.Tests"] = null;
+            }
 
-        // Add/Update these tests to run in appveyor+windows
-        if(parameters.IsRunningOnAppVeyor && parameters.IsRunningOnWindows)
-        {
-            testsToRun["MassTransit.MartenIntegration.Tests"] = null;
-            testsToRun["MassTransit.DocumentDbIntegration.Tests"] = null;
-            testsToRun["MassTransit.AutomatonymousIntegration.Tests"] = null; // We can include the DocumentDb and EF tests
-        }
-
-        // Add/Update these tests to run in appveyor+linux
-        if (parameters.IsRunningOnAppVeyor && parameters.IsRunningOnUnix)
-        {
-            testsToRun["MassTransit.RedisIntegration.Tests"] = null;
-            testsToRun["MassTransit.RabbitMqTransport.Tests"] = null;
-            testsToRun["MassTransit.AutomatonymousIntegration.Tests"] = "Category!=DocumentDb";
+            if(parameters.IsRunningOnWindows)
+            {
+                testsToRun.Clear();
+                testsToRun["MassTransit.MongoDbIntegration.Tests"] = null;
+                testsToRun["MassTransit.EntityFrameworkCoreIntegration.Tests"] = "Category!=Flakey&Category!=Integration";
+                testsToRun["MassTransit.EntityFrameworkIntegration.Tests"] = "Category!=Flakey&Category!=Integration";
+                testsToRun["MassTransit.MartenIntegration.Tests"] = null;
+                testsToRun["MassTransit.Azure.Cosmos.Tests"] = null;
+            }
         }
 
         return new Tests{ Criteria = testsToRun };
