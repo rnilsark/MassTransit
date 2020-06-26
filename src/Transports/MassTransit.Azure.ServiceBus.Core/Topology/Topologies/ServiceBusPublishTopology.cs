@@ -3,6 +3,7 @@
     using System;
     using System.Security.Cryptography;
     using System.Text;
+    using Builders;
     using MassTransit.Topology;
     using MassTransit.Topology.Topologies;
     using Metadata;
@@ -20,6 +21,9 @@
             _messageTopology = messageTopology;
         }
 
+        public PublishEndpointBrokerTopologyBuilder.Options BrokerTopologyOptions { get; set; } =
+            PublishEndpointBrokerTopologyBuilder.Options.MaintainHierarchy;
+        
         IServiceBusMessagePublishTopology<T> IServiceBusPublishTopology.GetMessageTopology<T>()
         {
             return GetMessageTopology<T>() as IServiceBusMessagePublishTopologyConfigurator<T>;
@@ -63,10 +67,12 @@
         {
             var messageTopology = new ServiceBusMessagePublishTopology<T>(_messageTopology.GetMessageTopology<T>(), this);
 
-            var connector = new ImplementedMessageTypeConnector<T>(this, messageTopology);
-
-            ImplementedMessageTypeCache<T>.EnumerateImplementedTypes(connector);
-
+            //if (BrokerTopologyOptions.HasFlag(PublishEndpointBrokerTopologyBuilder.Options.MaintainHierarchy))
+            //{
+                var connector = new ImplementedMessageTypeConnector<T>(this, messageTopology);
+                ImplementedMessageTypeCache<T>.EnumerateImplementedTypes(connector);
+            //}
+            
             OnMessageTopologyCreated(messageTopology);
 
             return messageTopology;
