@@ -30,7 +30,7 @@
             _sendTopology.TryAddConvention(new SessionIdSendTopologyConvention());
             _sendTopology.TryAddConvention(new PartitionKeySendTopologyConvention());
 
-            _publishTopology = new ServiceBusPublishTopology(messageTopology);
+            _publishTopology = new ServiceBusNonPolymorphicPublishTopology(messageTopology);
             _publishTopology.ConnectPublishTopologyConfigurationObserver(new DelegatePublishTopologyConfigurationObserver(GlobalTopology.Publish));
 
             var observer = new PublishToSendTopologyConfigurationObserver(_sendTopology);

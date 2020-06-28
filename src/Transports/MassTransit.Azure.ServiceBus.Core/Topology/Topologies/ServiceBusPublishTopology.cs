@@ -69,10 +69,10 @@
 
             //if (BrokerTopologyOptions.HasFlag(PublishEndpointBrokerTopologyBuilder.Options.MaintainHierarchy))
             //{
-                var connector = new ImplementedMessageTypeConnector<T>(this, messageTopology);
-                ImplementedMessageTypeCache<T>.EnumerateImplementedTypes(connector);
+            var connector = new ImplementedMessageTypeConnector<T>(this, messageTopology);
+            ImplementedMessageTypeCache<T>.EnumerateImplementedTypes(connector);
             //}
-            
+
             OnMessageTopologyCreated(messageTopology);
 
             return messageTopology;

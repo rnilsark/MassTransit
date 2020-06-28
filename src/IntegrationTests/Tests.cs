@@ -2,6 +2,7 @@
 {
     using System;
     using System.Collections.Generic;
+    using System.Threading;
     using System.Threading.Tasks;
     using MassTransit;
     using Newtonsoft.Json;
@@ -13,6 +14,7 @@
         [Test]
         public async Task Publishing_hierarchical_event()
         {
+            int i = 0;
             var consumer = Bus.Factory.CreateUsingAzureServiceBus(configurator =>
             {
                 configurator.Host(TestConstants.BusConnectionString, hostConfigurator =>
@@ -25,6 +27,7 @@
                         endpointConfigurator.Handler((MessageHandler<IBasiestEventInterface>)(context =>
                         {
                             Console.WriteLine($"Consumer: {nameof(IBasiestEventInterface)} Message: {JsonConvert.SerializeObject(context.Message)}");
+                            Interlocked.Increment(ref i);
                             return Task.CompletedTask;
                         }));
                     });
@@ -37,13 +40,16 @@
                 configurator.Host(TestConstants.BusConnectionString, hostConfigurator =>
                 {
                 });
+
+                //configurator.PublishTopology.BrokerTopologyOptions = MassTransit.Azure.ServiceBus.Core.Topology.Builders.PublishEndpointBrokerTopologyBuilder.Options.FlattenHierarchy;
+
             });
 
             await publisher.StartAsync();
             await publisher.Publish(new TheEvent());
-            await publisher.Publish(new TheEvent());
             
             await Task.Delay(TimeSpan.FromSeconds(10));
+            Assert.AreEqual(1, i);
         }
 
         [Test]
@@ -173,7 +179,7 @@
                         endpointConfigurator.Handler((MessageHandler<FlatEvent>)(context =>
                         {
                             Console.WriteLine(
-                                $"Consumer: {nameof(IBasiestEventInterface)} Message: {JsonConvert.SerializeObject(context.Message)}");
+                                $"Consumer: {nameof(FlatEvent)} Message: {JsonConvert.SerializeObject(context.Message)}");
                             return Task.CompletedTask;
                         }));
                     });
