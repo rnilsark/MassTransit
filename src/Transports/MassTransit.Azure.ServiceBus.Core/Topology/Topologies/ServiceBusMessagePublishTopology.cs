@@ -46,7 +46,7 @@ namespace MassTransit.Azure.ServiceBus.Core.Topology.Topologies
         {
             var description = GetTopicDescription();
 
-            var builder = new PublishEndpointBrokerTopologyBuilder(_publishTopology, _publishTopology.BrokerTopologyOptions);
+            var builder = new PublishEndpointBrokerTopologyBuilder(_publishTopology);
 
             Apply(builder);
 

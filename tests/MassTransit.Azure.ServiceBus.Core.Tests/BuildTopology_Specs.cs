@@ -42,6 +42,22 @@ namespace MassTransit.Azure.ServiceBus.Core.Tests
             SecondInterface
         {
         }
+
+
+        public interface InterfacePart1
+        {
+            string Part1Value { get; }
+        }
+
+        public interface InterfacePart2
+        {
+            string Part2Value { get; }
+        }
+
+        public interface InterfaceInheritingTwoInterfaces :
+            InterfacePart1, InterfacePart2
+        {
+        }
     }
 
 
@@ -79,41 +95,40 @@ namespace MassTransit.Azure.ServiceBus.Core.Tests
         }
     }
 
-    //[TestFixture]
-    //public class Publish_with_complex_hierarchy2 :
-    //    AzureServiceBusTestFixture
-    //{
-    //    [Test]
-    //    public async Task Should_be_received()
-    //    {
-    //        await Bus.Publish<ThirdInterface>(new {Value = "A"});
-    //        await Bus.Publish<AnotherThirdInterface>(new {Value = "B"});
+    public class Publish_with_complex_parallell_hierarchy :
+        AzureServiceBusTestFixture
+    {
+        [Test]
+        public async Task Should_be_received()
+        {
+            await Bus.Publish<InterfaceInheritingTwoInterfaces>(new { Part1Value = "A", Part2Value = "B" });
+            
+            ConsumeContext<InterfacePart1> received = await _receivedA;
 
-    //        ConsumeContext<ThirdInterface> received = await _receivedA;
+            await Task.Delay(10000);
 
-    //        await Task.Delay(10000);
-    //    }
+            Assert.That(_count1, Is.EqualTo(1));
+            Assert.That(_count1, Is.EqualTo(1));
+        }
 
-    //    Task<ConsumeContext<ThirdInterface>> _receivedA;
-    //    Task<ConsumeContext<AnotherThirdInterface>> _receivedB;
-        
-    //    protected override void ConfigureServiceBusBus(IServiceBusBusFactoryConfigurator configurator)
-    //    {
-    //        base.ConfigureServiceBusBus(configurator);
+        Task<ConsumeContext<InterfacePart1>> _receivedA;
+        Task<ConsumeContext<InterfacePart2>> _receivedB;
+        int _count1;
+        int _count2;
 
-    //        configurator.PublishTopology.BrokerTopologyOptions = PublishEndpointBrokerTopologyBuilder.Options.FlattenHierarchy;
-    //    }
+        protected override void ConfigureServiceBusReceiveEndpoint(IServiceBusReceiveEndpointConfigurator configurator)
+        {
+            base.ConfigureServiceBusReceiveEndpoint(configurator);
 
-    //    protected override void ConfigureServiceBusReceiveEndpoint(IServiceBusReceiveEndpointConfigurator configurator)
-    //    {
-    //        base.ConfigureServiceBusReceiveEndpoint(configurator);
+            configurator.EnableDuplicateDetection(TimeSpan.FromSeconds(30));
 
-    //        configurator.EnableDuplicateDetection(TimeSpan.FromSeconds(30));
+            _receivedA = Handled<InterfacePart1>(configurator, context => context.Message.Part1Value == "A");
+            _receivedB = Handled<InterfacePart2>(configurator, context => context.Message.Part2Value == "B");
 
-    //        _receivedA = Handled<ThirdInterface>(configurator, context => context.Message.Value == "A");
-    //        _receivedB = Handled<AnotherThirdInterface>(configurator, context => context.Message.Value == "B");
-    //    }
-    //}
+            configurator.Handler<InterfacePart1>(async context => Interlocked.Increment(ref _count1));
+            configurator.Handler<InterfacePart2>(async context => Interlocked.Increment(ref _count2));
+        }
+    }
 
     [TestFixture]
     public class Configuring_a_topology :
@@ -213,24 +228,28 @@ namespace MassTransit.Azure.ServiceBus.Core.Tests
     public class Using_flattened_topology_to_bind_publishers
     {
         [Test]
-        public void Should_include_a_topic_for_the_second_interface_only()
+        public void Should_include_a_binding_for_the_second_interface_only()
         {
             _publishTopology.GetMessageTopology<SecondInterface>()
                 .Apply(_builder);
 
             var topology = _builder.BuildBrokerTopology();
 
+            var singleInterfaceName = _nameFormatter.GetMessageName(typeof(FirstInterface)).ToString();
             var interfaceName = _nameFormatter.GetMessageName(typeof(SecondInterface)).ToString();
 
             Assert.That(topology.Topics.Any(x => x.TopicDescription.Path == interfaceName), Is.True);
             Assert.That(topology.Topics.Length, Is.EqualTo(2));
-            Assert.That(topology.TopicSubscriptions.Length, Is.EqualTo(0));
-            
-            Assert.That(topology.Topics.Any(x => x.TopicDescription.Path == interfaceName), Is.True);
+            Assert.That(topology.TopicSubscriptions.Length, Is.EqualTo(1));
+            Assert.That(
+                topology.TopicSubscriptions.Any(x =>
+                    x.Source.TopicDescription.Path == interfaceName && x.Destination.TopicDescription.Path == singleInterfaceName), Is.True);
+
+            Assert.That(topology.Topics.Any(x => x.TopicDescription.Path == singleInterfaceName), Is.True);
         }
 
         [Test]
-        public void Should_include_a_topic_for_the_single_interface()
+        public void Should_include_a_binding_for_the_single_interface()
         {
             _publishTopology.GetMessageTopology<SingleInterface>()
                 .Apply(_builder);
@@ -251,7 +270,7 @@ namespace MassTransit.Azure.ServiceBus.Core.Tests
             _entityNameFormatter = new MessageNameFormatterEntityNameFormatter(_nameFormatter);
             _publishTopology = new ServiceBusPublishTopology(AzureBusFactory.MessageTopology);
 
-            _builder = new PublishEndpointBrokerTopologyBuilder(_publishTopology, PublishEndpointBrokerTopologyBuilder.Options.FlattenHierarchy);
+            _builder = new PublishEndpointBrokerTopologyBuilder(_publishTopology);
         }
 
         ServiceBusMessageNameFormatter _nameFormatter;
@@ -265,7 +284,7 @@ namespace MassTransit.Azure.ServiceBus.Core.Tests
     public class Using_hierarchical_topology_to_bind_publishers
     {
         [Test]
-        public void Should_include_a_subscription_for_the_second_interface_only()
+        public void Should_include_a_binding_for_the_second_interface_only()
         {
             _publishTopology.GetMessageTopology<SecondInterface>()
                 .Apply(_builder);
@@ -287,7 +306,7 @@ namespace MassTransit.Azure.ServiceBus.Core.Tests
         }
 
         [Test]
-        public void Should_include_a_subscription_for_the_single_interface()
+        public void Should_include_a_binding_for_the_single_interface()
         {
             _publishTopology.GetMessageTopology<SingleInterface>()
                 .Apply(_builder);
@@ -303,7 +322,7 @@ namespace MassTransit.Azure.ServiceBus.Core.Tests
         }
 
         [Test]
-        public void Should_include_a_subscription_for_the_third_interface_as_well()
+        public void Should_include_a_binding_for_the_third_interface_as_well()
         {
             _publishTopology.GetMessageTopology<ThirdInterface>()
                 .Apply(_builder);

@@ -4,6 +4,8 @@
     using System.Collections.Generic;
     using System.Threading;
     using System.Threading.Tasks;
+    using IntegrationTests.Cleaner;
+    using IntegrationTests.Problem;
     using MassTransit;
     using Newtonsoft.Json;
     using NUnit.Framework;
@@ -24,10 +26,16 @@
                 configurator.ReceiveEndpoint(nameof(Publishing_hierarchical_event),
                     endpointConfigurator =>
                     {
-                        endpointConfigurator.Handler((MessageHandler<IBasiestEventInterface>)(context =>
+                        endpointConfigurator.Handler((MessageHandler<IProblem_2_Part1>)(context =>
                         {
-                            Console.WriteLine($"Consumer: {nameof(IBasiestEventInterface)} Message: {JsonConvert.SerializeObject(context.Message)}");
+                            Console.WriteLine($"Consumer: {nameof(IProblem_2_Part1)} Message: {JsonConvert.SerializeObject(context.Message)}");
                             Interlocked.Increment(ref i);
+                            return Task.CompletedTask;
+                        }));
+
+                        endpointConfigurator.Handler((MessageHandler<IProblem_2_Part2>)(context =>
+                        {
+                            Console.WriteLine($"Consumer: {nameof(IProblem_2_Part2)} Message: {JsonConvert.SerializeObject(context.Message)}");
                             return Task.CompletedTask;
                         }));
                     });
@@ -40,14 +48,57 @@
                 configurator.Host(TestConstants.BusConnectionString, hostConfigurator =>
                 {
                 });
-
-                //configurator.PublishTopology.BrokerTopologyOptions = MassTransit.Azure.ServiceBus.Core.Topology.Builders.PublishEndpointBrokerTopologyBuilder.Options.FlattenHierarchy;
-
             });
 
             await publisher.StartAsync();
-            await publisher.Publish(new TheEvent());
+            await publisher.Publish(new TheProblemEvent());
             
+            await Task.Delay(TimeSpan.FromSeconds(10));
+            Assert.AreEqual(1, i);
+        }
+
+        [Test]
+        public async Task Publishing_hierarchical_event_cleaner()
+        {
+            int i = 0;
+            var consumer = Bus.Factory.CreateUsingAzureServiceBus(configurator =>
+            {
+                configurator.Host(TestConstants.BusConnectionString, hostConfigurator =>
+                {
+                });
+
+                configurator.ReceiveEndpoint(nameof(Publishing_hierarchical_event_cleaner),
+                    endpointConfigurator =>
+                    {
+                        endpointConfigurator.EnableDuplicateDetection(TimeSpan.FromSeconds(30));
+
+                        endpointConfigurator.Handler((MessageHandler<IPart1>)(context =>
+                        {
+                            Console.WriteLine($"Consumer: {nameof(IPart1)} Message: {JsonConvert.SerializeObject(context.Message)}");
+                            Interlocked.Increment(ref i);
+                            return Task.CompletedTask;
+                        }));
+
+                        endpointConfigurator.Handler((MessageHandler<IPart2>)(context =>
+                        {
+                            Console.WriteLine($"Consumer: {nameof(IPart2)} Message: {JsonConvert.SerializeObject(context.Message)}");
+                            return Task.CompletedTask;
+                        }));
+                    });
+            });
+
+            await consumer.StartAsync();
+
+            var publisher = Bus.Factory.CreateUsingAzureServiceBus(configurator =>
+            {
+                configurator.Host(TestConstants.BusConnectionString, hostConfigurator =>
+                {
+                });
+            });
+
+            await publisher.StartAsync();
+            await publisher.Publish(new TheCleanerEvent());
+
             await Task.Delay(TimeSpan.FromSeconds(10));
             Assert.AreEqual(1, i);
         }
@@ -75,7 +126,7 @@
                 configurator.ReceiveEndpoint(nameof(Publishing_hierarchical_event_deploying_topology_first),
                     endpointConfigurator =>
                     {
-                        endpointConfigurator.Handler((MessageHandler<IBasiestEventInterface>)(context => Task.CompletedTask));
+                        endpointConfigurator.Handler((MessageHandler<IProblem_2_Part1>)(context => Task.CompletedTask));
                     });
             });
 
@@ -91,9 +142,9 @@
                 configurator.ReceiveEndpoint(nameof(Publishing_hierarchical_event_deploying_topology_first),
                     endpointConfigurator =>
                     {
-                        endpointConfigurator.Handler((MessageHandler<IBasiestEventInterface>)(context =>
+                        endpointConfigurator.Handler((MessageHandler<IProblem_2_Part1>)(context =>
                         {
-                            Console.WriteLine($"Consumer: {nameof(IBasiestEventInterface)} Message: {JsonConvert.SerializeObject(context.Message)}");
+                            Console.WriteLine($"Consumer: {nameof(IProblem_2_Part1)} Message: {JsonConvert.SerializeObject(context.Message)}");
                             return Task.CompletedTask;
                         }));
                     });
@@ -112,8 +163,8 @@
             });
 
             await publisher.StartAsync();
-            await publisher.Publish(new TheEvent());
-            await publisher.Publish(new TheEvent());
+            await publisher.Publish(new TheProblemEvent());
+            await publisher.Publish(new TheProblemEvent());
 
             await Task.Delay(TimeSpan.FromSeconds(10));
         }
@@ -130,10 +181,10 @@
                 configurator.ReceiveEndpoint(nameof(Publishing_hierarchical_event_from_multiple_producers),
                     endpointConfigurator =>
                     {
-                        endpointConfigurator.Handler((MessageHandler<IBasiestEventInterface>)(context =>
+                        endpointConfigurator.Handler((MessageHandler<IProblem_2_Part1>)(context =>
                         {
                             Console.WriteLine(
-                                $"Consumer: {nameof(IBasiestEventInterface)} Message: {JsonConvert.SerializeObject(context.Message)}");
+                                $"Consumer: {nameof(IProblem_2_Part1)} Message: {JsonConvert.SerializeObject(context.Message)}");
                             return Task.CompletedTask;
                         }));
                     });
@@ -154,7 +205,7 @@
                     });
 
                     await publisher.StartAsync();
-                    await publisher.Publish(new TheEvent());
+                    await publisher.Publish(new TheProblemEvent());
 
                 }));
             }
@@ -207,13 +258,6 @@
             await Task.WhenAll(tasks);
 
             await Task.Delay(TimeSpan.FromSeconds(10));
-        }
-
-        public class TheEvent : IBaseEventInterface
-        {
-            public string P1 { get; } = "A";
-            public string P2 { get; } = "B";
-            public string P3 { get; } = "C";
         }
 
         public class FlatEvent
